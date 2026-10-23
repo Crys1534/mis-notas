@@ -1,11 +1,13 @@
 // Service worker: deja la app funcionar sin internet.
 // Si cambias algún archivo, sube el número de versión para que el celular se actualice.
-const VERSION = 'mis-notas-v1';
+const VERSION = 'mis-notas-v2';
 const SHELL = [
   './',
   './index.html',
   './style.css',
   './app.js',
+  './stickers.js',
+  './sounds.js',
   './manifest.json',
   './icon.svg',
   './icon-192.png',

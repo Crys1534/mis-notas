@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es" data-theme="auto">
+<html lang="es" data-theme="auto" data-board="cork">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -19,7 +19,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body data-view="month">
 
 <main class="app">
   <div class="topbar">
@@ -30,6 +30,12 @@
     </div>
   </div>
 
+  <div class="seg" role="group" aria-label="Vista">
+    <button id="v-month" type="button" class="on">Mes</button>
+    <button id="v-week" type="button">Semana</button>
+  </div>
+
+  <!-- vista de mes -->
   <section class="cal" id="cal">
     <div class="cal-top"></div>
     <header class="cal-head">
@@ -49,6 +55,16 @@
       <div id="progress" class="progress"></div>
     </div>
     <div id="notes" class="notes"></div>
+  </section>
+
+  <!-- vista de semana -->
+  <section class="week" id="week">
+    <div class="week-head">
+      <button id="wprev" class="pill round" type="button" aria-label="Semana anterior">‹</button>
+      <h2 id="week-title"></h2>
+      <button id="wnext" class="pill round" type="button" aria-label="Semana siguiente">›</button>
+    </div>
+    <div id="week-board" class="week-board"></div>
   </section>
 </main>
 
@@ -72,6 +88,12 @@
     </label>
   </div>
 
+  <details id="d-subs" class="more">
+    <summary>☑ Subtareas <small id="subs-count"></small></summary>
+    <div id="f-subs" class="subs-edit"></div>
+    <button type="button" id="f-add-sub" class="btn small ghost">+ Agregar paso</button>
+  </details>
+
   <div class="fld"><span class="lbl">Repetir</span><div id="f-repeat" class="chips"></div></div>
   <div class="fld">
     <span class="lbl">Recordar</span>
@@ -79,6 +101,23 @@
     <small class="hint">Si no pones hora, el aviso llega a las 9:00.</small>
   </div>
   <div class="fld"><span class="lbl">Color</span><div id="f-color" class="swatches"></div></div>
+
+  <details id="d-stk" class="more">
+    <summary>🎀 Pegatinas <small id="stk-count"></small></summary>
+    <div id="stage" class="stage"><div id="stage-title" class="stage-title"></div></div>
+    <div id="stk-tools" class="stk-tools" hidden>
+      <button type="button" data-act="smaller" aria-label="Más chica">➖</button>
+      <button type="button" data-act="bigger" aria-label="Más grande">➕</button>
+      <button type="button" data-act="rotl" aria-label="Girar a la izquierda">↶</button>
+      <button type="button" data-act="rotr" aria-label="Girar a la derecha">↷</button>
+      <button type="button" data-act="front" aria-label="Traer al frente">⬆</button>
+      <button type="button" data-act="del" aria-label="Quitar pegatina">🗑</button>
+    </div>
+    <p class="hint">Toca una pegatina para ponerla. Arrástrala para moverla.</p>
+    <div id="pack-tabs" class="pack-tabs"></div>
+    <div id="pack-name" class="pack-name"></div>
+    <div id="pack-grid" class="pack-grid"></div>
+  </details>
 
   <div class="actions">
     <button id="f-delete" class="link danger" type="button">Borrar</button>
@@ -115,8 +154,22 @@
   </section>
 
   <section>
+    <h4>🖼 Fondo del tablero</h4>
+    <div id="s-board" class="boards"></div>
+  </section>
+
+  <section>
     <h4>🎨 Apariencia</h4>
     <div id="s-theme" class="chips"></div>
+  </section>
+
+  <section>
+    <h4>🔊 Sonidos</h4>
+    <div id="s-sound" class="chips"></div>
+    <div id="s-volume" class="chips" style="margin-top:8px"></div>
+    <div id="s-vibrate" class="chips" style="margin-top:8px"></div>
+    <p class="hint">Toca para probar:</p>
+    <div id="s-board-sfx" class="chips sfx"></div>
   </section>
 
   <section>
@@ -133,6 +186,8 @@
 
 <div id="toast" class="toast" role="status"></div>
 
+<script src="stickers.js"></script>
+<script src="sounds.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

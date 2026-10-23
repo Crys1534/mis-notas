@@ -18,9 +18,22 @@
     { v: 60, l: '1 hora antes' },
     { v: 1440, l: '1 día antes' }
   ];
+  const BOARDS = [
+    { v: 'cork', l: 'Corcho', c: '#c9a36d' },
+    { v: 'chalk', l: 'Pizarrón', c: '#2f4a3e' },
+    { v: 'wood', l: 'Madera', c: '#b9824f' },
+    { v: 'grid', l: 'Cuadriculado', c: '#f4efe2' }
+  ];
+  const SFX_LABELS = {
+    tap: '✏️ Lápiz', pop: '🫧 Burbuja', paste: '📌 Pegar', peel: '🧻 Despegar', check: '✅ ¡Hecho!', uncheck: '↩️ Deshacer',
+    pin: '📍 Chincheta', tape: '🎀 Cinta', sticker: '⭐ Pegatina', meow: '🐱 Miau', mew: '😺 Mew', bell: '🔔 Campanita',
+    tada: '🎉 ¡Tada!', flip: '📄 Página', open: '⬆️ Abrir', close: '⬇️ Cerrar', swatch: '🖍 Plumón', sub: '☑️ Casilla',
+    drop: '👇 Soltar', error: '🙈 Ups', toast: '💬 Aviso', chip: '👆 Opción', update: '✏️ Editar'
+  };
   const HORIZON = 71 * 3600e3;   // ntfy solo programa hasta 3 días adelante
   const MIN_AHEAD = 30e3;        // y mínimo 10 segundos
   const NTFY = 'https://ntfy.sh';
+  const MAX_STK = 12;
   const CHECK_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13l5 5L20 6"/></svg>';
 
   /* ================= Utilidades ================= */
@@ -34,27 +47,46 @@
   const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* sin espacio */ } };
   const newId = () => 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
   const hash = s => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); };
+  const num = (v, a, b, fb) => (typeof v === 'number' && isFinite(v) ? Math.min(b, Math.max(a, v)) : fb);
   const genTopic = () => {
     const abc = 'abcdefghjkmnpqrstuvwxyz23456789';
     const a = new Uint8Array(16);
     (window.crypto || window.msCrypto).getRandomValues(a);
     return 'notas-' + Array.from(a, n => abc[n % abc.length]).join('');
   };
+  const byTime = (a, b) => (a.time || '').localeCompare(b.time || '') || (a.created || 0) - (b.created || 0);
 
   /* ================= Estado ================= */
   let tasks = load('pn.tasks', []);
-  let settings = Object.assign({ theme: 'auto', topic: '', remindersOn: true }, load('pn.settings', {}));
+  let settings = Object.assign(
+    { theme: 'auto', topic: '', remindersOn: true, board: 'cork', view: 'month', sound: true, volume: 'mid', vibrate: true },
+    load('pn.settings', {})
+  );
+  if (!BOARDS.some(b => b.v === settings.board)) settings.board = 'cork';
+  if (settings.view !== 'week') settings.view = 'month';
   let sent = load('pn.sent', {});          // { idDeAviso: momentoEnMs }
-  if (!settings.topic) { settings.topic = genTopic(); save('pn.settings', settings); }
+  if (!settings.topic) { settings.topic = genTopic(); }
+  save('pn.settings', settings);
 
   let sel = todayStr();
   let viewY = new Date().getFullYear();
   let viewM = new Date().getMonth();
   let ed = null;                            // estado del editor
+  let edSubs = [];                          // subtareas en edición
+  let stk = [];                             // pegatinas en edición
+  let selStk = -1;
+  let curPack = window.STK ? window.STK.packs[0].id : '';
   let renderTimer = null;
 
   const persist = () => save('pn.tasks', tasks);
   const persistSettings = () => save('pn.settings', settings);
+
+  /* ================= Sonido y vibración ================= */
+  const VOLS = { low: 0.3, mid: 0.6, high: 1 };
+  const play = n => { if (window.SFX) window.SFX.play(n); };
+  const buzz = ms => { if (settings.vibrate && navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) { /* nada */ } } };
+  function applySound() { if (window.SFX) window.SFX.set({ on: settings.sound, vol: VOLS[settings.volume] || 0.6 }); }
+  document.addEventListener('pointerdown', () => { if (window.SFX) window.SFX.unlock(); }, { once: true });
 
   /* ================= Lógica de fechas ================= */
   function occursOn(t, ds) {
@@ -85,7 +117,19 @@
     return d.getTime() - Math.max(0, t.remind) * 60e3;
   }
 
-  /* ================= Render ================= */
+  /* ================= Pegatinas (dibujo) ================= */
+  function stickerEl(s) {
+    const it = window.STK && window.STK.byId[s.k];
+    if (!it) return null;
+    const el = document.createElement('span');
+    el.className = 'stk' + (it.tape ? ' tape' : '');
+    el.style.cssText = `left:${s.x}%;top:${s.y}%;--s:${s.s};--w:${it.w || 1};--rot:${s.r}deg`;
+    el.innerHTML = it.svg;
+    return el;
+  }
+  const hasCat = t => (t.stk || []).some(s => window.STK && window.STK.byId[s.k] && window.STK.byId[s.k].snd === 'cat');
+
+  /* ================= Render: calendario ================= */
   function renderCalendar() {
     $('#month-title').textContent = `${MONTHS[viewM]} ${viewY}`;
     const grid = $('#grid');
@@ -133,10 +177,11 @@
     }
   }
 
-  function makeCard(t, ds) {
+  /* ================= Render: post-its ================= */
+  function makeCard(t, ds, compact, anim) {
     const done = isDone(t, ds);
     const card = document.createElement('div');
-    card.className = 'note' + (done ? ' done' : '');
+    card.className = 'note' + (done ? ' done' : '') + (compact ? ' compact' : '') + (anim ? ' anim' : '');
     card.style.setProperty('--c', COLORS[t.color]);
     card.style.setProperty('--r', (((hash(t.id) % 50) - 25) / 10) + 'deg');
     card.setAttribute('role', 'button');
@@ -160,14 +205,44 @@
     const title = document.createElement('div');
     title.className = 'title';
     title.textContent = t.title;
+    card.append(top, title);
+
+    const subs = t.subs || [];
+    const subsDone = (t.sdone && t.sdone[ds]) || [];
+    if (!compact && subs.length) {
+      const box = document.createElement('div');
+      box.className = 'subs';
+      subs.slice(0, 5).forEach(s => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'sub' + (subsDone.includes(s.id) ? ' on' : '');
+        const bx = document.createElement('i');
+        bx.className = 'bx';
+        bx.innerHTML = CHECK_SVG;
+        const tx = document.createElement('span');
+        tx.textContent = s.t;
+        b.append(bx, tx);
+        b.addEventListener('click', e => { e.stopPropagation(); toggleSub(t, ds, s.id); });
+        box.append(b);
+      });
+      if (subs.length > 5) {
+        const more = document.createElement('div');
+        more.className = 'sub-more';
+        more.textContent = `+${subs.length - 5} más`;
+        box.append(more);
+      }
+      card.append(box);
+    }
 
     const meta = document.createElement('div');
     meta.className = 'meta';
     if (isLate(t, ds)) { const l = document.createElement('span'); l.className = 'late'; l.textContent = '¡atrasada!'; meta.append(l); }
-    if (t.repeat !== 'none') { const r = document.createElement('span'); r.textContent = '🔁 ' + REPEAT_TXT[t.repeat]; meta.append(r); }
+    if (compact && subs.length) { const c = document.createElement('span'); c.textContent = `☑ ${subsDone.filter(id => subs.some(s => s.id === id)).length}/${subs.length}`; meta.append(c); }
+    if (t.repeat !== 'none') { const r = document.createElement('span'); r.textContent = '🔁' + (compact ? '' : ' ' + REPEAT_TXT[t.repeat]); meta.append(r); }
     if (t.remind >= 0) { const b = document.createElement('span'); b.textContent = '🔔'; meta.append(b); }
+    card.append(meta);
 
-    card.append(top, title, meta);
+    (t.stk || []).forEach(s => { const el = stickerEl(s); if (el) card.append(el); });
 
     check.addEventListener('click', e => { e.stopPropagation(); toggleDone(t, ds, card, check); });
     card.addEventListener('click', () => openEditor(t));
@@ -175,12 +250,12 @@
     return card;
   }
 
-  function renderList() {
+  function renderList(anim) {
     const d = parseYmd(sel);
     const isToday = sel === todayStr();
     $('#day-title').textContent = (isToday ? 'Hoy · ' : '') + cap(DAYS[d.getDay()]) + ` ${d.getDate()} de ${MONTHS[d.getMonth()]}`;
 
-    const list = tasksOn(sel).sort((a, b) => (a.time || '').localeCompare(b.time || '') || (a.created || 0) - (b.created || 0));
+    const list = tasksOn(sel).sort(byTime);
     const doneN = list.filter(t => isDone(t, sel)).length;
     const prog = $('#progress');
     prog.innerHTML = '';
@@ -202,21 +277,100 @@
     box.innerHTML = '';
     if (!list.length) {
       const e = document.createElement('div');
-      e.className = 'note empty';
+      e.className = 'note empty' + (anim ? ' anim' : '');
       const t = document.createElement('div');
       t.className = 'title';
       t.textContent = isToday ? 'Nada para hoy… ¡toca + para pegar una nota!' : 'Sin notas este día. ¡Toca + para pegar una!';
       e.append(t);
       box.append(e);
     } else {
-      list.forEach(t => box.append(makeCard(t, sel)));
+      list.forEach(t => box.append(makeCard(t, sel, false, anim)));
     }
   }
 
-  function render() {
+  /* ================= Render: semana ================= */
+  function renderWeek(anim, center) {
+    const d = parseYmd(sel);
+    const start = new Date(d);
+    start.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    const sm = MONTHS[start.getMonth()], em = MONTHS[end.getMonth()];
+    $('#week-title').textContent = start.getMonth() === end.getMonth()
+      ? `${start.getDate()} – ${end.getDate()} de ${em}`
+      : `${start.getDate()} ${sm.slice(0, 3)} – ${end.getDate()} ${em.slice(0, 3)}`;
+
+    const board = $('#week-board');
+    const keep = board.scrollLeft;
+    board.innerHTML = '';
+    const today = todayStr();
+    for (let i = 0; i < 7; i++) {
+      const day = new Date(start);
+      day.setDate(start.getDate() + i);
+      const ds = ymd(day);
+      const col = document.createElement('div');
+      col.className = 'col' + (ds === today ? ' today' : '') + (ds === sel ? ' sel' : '');
+      col.dataset.date = ds;
+
+      const head = document.createElement('button');
+      head.type = 'button';
+      head.className = 'col-head';
+      const dn = document.createElement('span');
+      dn.className = 'dn';
+      dn.textContent = DAYS[day.getDay()].slice(0, 3);
+      const dd = document.createElement('span');
+      dd.className = 'dd';
+      dd.textContent = day.getDate();
+      head.append(dn, dd);
+
+      const box = document.createElement('div');
+      box.className = 'col-notes';
+      const list = tasksOn(ds).sort(byTime);
+      list.forEach(t => box.append(makeCard(t, ds, true, anim)));
+      if (!list.length) {
+        const e = document.createElement('div');
+        e.className = 'col-empty';
+        e.textContent = 'libre ✨';
+        box.append(e);
+      }
+
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'col-add';
+      add.textContent = '+ nota';
+      col.append(head, box, add);
+      board.append(col);
+    }
+    requestAnimationFrame(() => {
+      if (center) {
+        const t = board.querySelector('.col.sel');
+        if (t) board.scrollLeft = Math.max(0, t.offsetLeft - (board.clientWidth - t.offsetWidth) / 2);
+      } else {
+        board.scrollLeft = keep;
+      }
+    });
+  }
+
+  function render(anim = true, center = true) {
     clearTimeout(renderTimer);
-    renderCalendar();
-    renderList();
+    if (settings.view === 'week') {
+      renderWeek(anim, center);
+    } else {
+      renderCalendar();
+      renderList(anim);
+    }
+  }
+
+  function setView(v) {
+    settings.view = v;
+    persistSettings();
+    document.body.dataset.view = v;
+    $('#v-month').classList.toggle('on', v === 'month');
+    $('#v-week').classList.toggle('on', v === 'week');
+    const d = parseYmd(sel);
+    viewY = d.getFullYear();
+    viewM = d.getMonth();
+    render();
   }
 
   /* ================= Acciones sobre notas ================= */
@@ -240,17 +394,36 @@
     if (t.done[ds]) {
       delete t.done[ds];
       persist();
-      render();
+      play('uncheck');
+      render(false, false);
       syncReminders();
     } else {
       t.done[ds] = true;
       persist();
       card.classList.add('done');
       burst(check);
+      play('check');
+      buzz(25);
+      if (hasCat(t)) setTimeout(() => play(Math.random() < 0.5 ? 'mew' : 'meow'), 420);
+      const list = tasksOn(ds);
+      if (list.length >= 2 && list.every(x => isDone(x, ds))) {
+        setTimeout(() => { play('tada'); toast('¡Terminaste todo el día! 🎉'); }, 600);
+      }
       const seq = `${t.id}_${ds}`;
       if (sent[seq]) { delete sent[seq]; save('pn.sent', sent); ntfyDelete(seq); }
-      renderTimer = setTimeout(render, 650);
+      renderTimer = setTimeout(() => render(false, false), 650);
     }
+  }
+
+  function toggleSub(t, ds, sid) {
+    t.sdone = t.sdone || {};
+    const arr = t.sdone[ds] || (t.sdone[ds] = []);
+    const i = arr.indexOf(sid);
+    if (i >= 0) arr.splice(i, 1); else arr.push(sid);
+    persist();
+    play('sub');
+    buzz(8);
+    render(false, false);
   }
 
   function removeTask(id) {
@@ -264,12 +437,14 @@
   const settingsSheet = $('#settings');
   const backdrop = $('#backdrop');
 
-  function openSheet(el) { backdrop.classList.add('show'); el.classList.add('open'); }
+  function openSheet(el) { play('open'); backdrop.classList.add('show'); el.classList.add('open'); }
   function closeSheets() {
+    const was = editor.classList.contains('open') || settingsSheet.classList.contains('open');
     backdrop.classList.remove('show');
     editor.classList.remove('open');
     settingsSheet.classList.remove('open');
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    if (was) play('close');
   }
 
   function buildChips(el, options, get, set) {
@@ -279,7 +454,7 @@
       b.type = 'button';
       b.className = 'chip' + (get() === o.v ? ' on' : '');
       b.textContent = o.l;
-      b.addEventListener('click', () => { set(o.v); buildChips(el, options, get, set); });
+      b.addEventListener('click', () => { play('chip'); set(o.v); buildChips(el, options, get, set); });
       el.append(b);
     });
   }
@@ -294,24 +469,128 @@
       b.style.setProperty('--c', c);
       b.style.setProperty('--r', (i % 2 ? 4 : -4) + 'deg');
       b.setAttribute('aria-label', 'Color ' + (i + 1));
-      b.addEventListener('click', () => { ed.color = i; editor.style.setProperty('--sheet', c); buildSwatches(); });
+      b.addEventListener('click', () => { play('swatch'); ed.color = i; editor.style.setProperty('--sheet', c); buildSwatches(); });
       box.append(b);
     });
   }
 
-  function openEditor(t) {
+  /* --- subtareas --- */
+  function updateCounts() {
+    const n = edSubs.filter(s => s.t.trim()).length;
+    $('#subs-count').textContent = n ? `(${n})` : '';
+    $('#stk-count').textContent = stk.length ? `(${stk.length})` : '';
+  }
+  function renderSubsEdit() {
+    const box = $('#f-subs');
+    box.innerHTML = '';
+    edSubs.forEach((s, i) => {
+      const row = document.createElement('div');
+      row.className = 'sub-row';
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.maxLength = 60;
+      inp.value = s.t;
+      inp.placeholder = 'Paso…';
+      inp.addEventListener('input', () => { s.t = inp.value; updateCounts(); });
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addSub(i + 1); } });
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'x2';
+      x.textContent = '✕';
+      x.setAttribute('aria-label', 'Quitar paso');
+      x.addEventListener('click', () => { play('tap'); edSubs.splice(i, 1); renderSubsEdit(); });
+      row.append(inp, x);
+      box.append(row);
+    });
+    updateCounts();
+  }
+  function addSub(at) {
+    if (edSubs.length >= 20) { toast('Ya son muchos pasos 😅'); return; }
+    const i = at == null ? edSubs.length : at;
+    edSubs.splice(i, 0, { id: 's' + Math.random().toString(36).slice(2, 8), t: '' });
+    renderSubsEdit();
+    play('tap');
+    const inp = $('#f-subs').children[i] && $('#f-subs').children[i].querySelector('input');
+    if (inp) inp.focus();
+  }
+
+  /* --- pegatinas en el editor --- */
+  function renderStage() {
+    const st = $('#stage');
+    st.querySelectorAll('.stk').forEach(e => e.remove());
+    stk.forEach((s, i) => {
+      const el = stickerEl(s);
+      if (!el) return;
+      el.dataset.i = i;
+      if (i === selStk) el.classList.add('sel');
+      st.append(el);
+    });
+    $('#stk-tools').hidden = selStk < 0 || !stk[selStk];
+    updateCounts();
+  }
+  function renderPacks() {
+    if (!window.STK) return;
+    const tabs = $('#pack-tabs');
+    tabs.innerHTML = '';
+    window.STK.packs.forEach(p => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'pack-tab' + (p.id === curPack ? ' on' : '');
+      b.textContent = p.icon;
+      b.title = p.name;
+      b.setAttribute('aria-label', p.name);
+      b.addEventListener('click', () => { play('chip'); curPack = p.id; renderPacks(); });
+      tabs.append(b);
+    });
+    const pack = window.STK.packs.find(p => p.id === curPack) || window.STK.packs[0];
+    $('#pack-name').textContent = `${pack.icon} ${pack.name} · ${pack.items.length}`;
+    const grid = $('#pack-grid');
+    grid.innerHTML = '';
+    pack.items.forEach(it => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'pack-item' + (it.tape ? ' wide' : '') + (it.w > 1 && !it.tape ? ' wide' : '');
+      b.setAttribute('aria-label', it.id);
+      b.innerHTML = it.svg;
+      b.addEventListener('click', () => addSticker(it));
+      grid.append(b);
+    });
+  }
+  function addSticker(it) {
+    if (stk.length >= MAX_STK) { toast('¡Ya hay muchas pegatinas! 😸'); play('error'); return; }
+    const s = { k: it.id, x: 50 + (Math.random() * 44 - 22), y: 50 + (Math.random() * 44 - 22), s: 1, r: Math.round(Math.random() * 24 - 12) };
+    if (it.snd === 'pin') { s.y = 10; s.x = 36 + Math.random() * 28; s.r = 0; }
+    if (it.tape) { s.y = 12 + Math.random() * 10; s.x = 50; s.r = Math.round(Math.random() * 14 - 7); }
+    stk.push(s);
+    selStk = stk.length - 1;
+    renderStage();
+    play(it.snd === 'cat' ? (Math.random() < 0.5 ? 'meow' : 'mew') : (it.snd || 'sticker'));
+    buzz(10);
+  }
+
+  function openEditor(t, ds) {
     ed = t
       ? { id: t.id, color: t.color, repeat: t.repeat, remind: t.remind }
       : { id: null, color: Math.floor(Math.random() * COLORS.length), repeat: 'none', remind: 0 };
     $('#f-title').value = t ? t.title : '';
-    $('#f-date').value = t ? t.date : sel;
+    $('#stage-title').textContent = t ? t.title : '';
+    $('#f-date').value = t ? t.date : (ds || sel);
     $('#f-time').value = t ? t.time : '';
     $('#f-delete').style.display = t ? '' : 'none';
     $('#f-save').textContent = t ? 'Guardar' : 'Pegar nota';
+    edSubs = t && t.subs ? t.subs.map(s => ({ id: s.id, t: s.t })) : [];
+    stk = t && t.stk ? t.stk.map(s => Object.assign({}, s)) : [];
+    selStk = -1;
     editor.style.setProperty('--sheet', COLORS[ed.color]);
     buildChips($('#f-repeat'), REPEATS, () => ed.repeat, v => { ed.repeat = v; });
     buildChips($('#f-remind'), REMINDS, () => ed.remind, v => { ed.remind = v; });
     buildSwatches();
+    renderSubsEdit();
+    renderStage();
+    renderPacks();
+    $('#d-subs').open = edSubs.length > 0;
+    $('#d-stk').open = stk.length > 0;
+    editor.scrollTop = 0;
     openSheet(editor);
     if (!t) setTimeout(() => $('#f-title').focus(), 320);
   }
@@ -320,6 +599,7 @@
     const titleEl = $('#f-title');
     const title = titleEl.value.trim();
     if (!title) {
+      play('error');
       titleEl.classList.remove('shake');
       void titleEl.offsetWidth;
       titleEl.classList.add('shake');
@@ -328,27 +608,34 @@
     }
     const date = $('#f-date').value || sel;
     const time = $('#f-time').value || '';
-    const data = { title, date, time, repeat: ed.repeat, remind: ed.remind, color: ed.color };
+    const subs = edSubs.filter(s => s.t.trim()).map(s => ({ id: s.id, t: s.t.trim().slice(0, 60) }));
+    const data = {
+      title, date, time, repeat: ed.repeat, remind: ed.remind, color: ed.color,
+      subs, stk: stk.map(s => Object.assign({}, s))
+    };
 
     if (ed.id) {
       const t = tasks.find(x => x.id === ed.id);
       if (t) {
         cancelTask(t.id);
-        if (t.date !== date) t.done = {};
+        if (t.date !== date) { t.done = {}; t.sdone = {}; }
         Object.assign(t, data);
       }
     } else {
-      tasks.push(Object.assign({ id: newId(), done: {}, created: Date.now() }, data));
+      tasks.push(Object.assign({ id: newId(), done: {}, sdone: {}, created: Date.now() }, data));
     }
     persist();
     sel = date;
     const d = parseYmd(date);
     viewY = d.getFullYear();
     viewM = d.getMonth();
+    const wasEdit = !!ed.id;
     closeSheets();
     render();
     syncReminders();
-    toast(ed.id ? 'Nota actualizada ✏️' : 'Nota pegada 📌');
+    play(wasEdit ? 'update' : 'paste');
+    buzz(15);
+    toast(wasEdit ? 'Nota actualizada ✏️' : 'Nota pegada 📌');
   }
 
   function deleteFromEditor() {
@@ -359,6 +646,7 @@
     removeTask(t.id);
     closeSheets();
     render();
+    play('peel');
     toast('Nota despegada 🗑️');
   }
 
@@ -431,10 +719,38 @@
   /* ================= Ajustes ================= */
   const THEMES = [{ v: 'auto', l: 'Automático' }, { v: 'light', l: 'Claro' }, { v: 'dark', l: 'Oscuro' }];
 
-  function applyTheme() {
-    document.documentElement.dataset.theme = settings.theme === 'light' ? 'light' : settings.theme;
+  function applyTheme() { document.documentElement.dataset.theme = settings.theme; }
+  function applyBoard() {
+    document.documentElement.dataset.board = settings.board;
+    const b = BOARDS.find(x => x.v === settings.board);
+    const m = document.querySelector('meta[name="theme-color"]');
+    if (m && b) m.setAttribute('content', b.c);
   }
   function setStatus(msg) { $('#s-status').textContent = msg; }
+
+  function renderBoards() {
+    const box = $('#s-board');
+    box.innerHTML = '';
+    BOARDS.forEach(b => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'board-opt' + (settings.board === b.v ? ' on' : '');
+      btn.dataset.b = b.v;
+      const sw = document.createElement('span');
+      sw.className = 'bsw';
+      const lb = document.createElement('span');
+      lb.textContent = b.l;
+      btn.append(sw, lb);
+      btn.addEventListener('click', () => {
+        play('paste');
+        settings.board = b.v;
+        persistSettings();
+        applyBoard();
+        renderBoards();
+      });
+      box.append(btn);
+    });
+  }
 
   function renderSettings() {
     $('#s-topic').value = settings.topic;
@@ -445,6 +761,31 @@
       if (v) syncReminders(); else cancelAll();
       renderSettings();
     });
+    buildChips($('#s-sound'), [{ v: true, l: '🔊 Sonidos activados' }, { v: false, l: '🔇 Sin sonido' }], () => settings.sound, v => {
+      settings.sound = v; persistSettings(); applySound();
+      if (v) setTimeout(() => play('bell'), 80);
+    });
+    buildChips($('#s-volume'), [{ v: 'low', l: 'Bajito' }, { v: 'mid', l: 'Medio' }, { v: 'high', l: 'Fuerte' }], () => settings.volume, v => {
+      settings.volume = v; persistSettings(); applySound();
+      setTimeout(() => play('pop'), 60);
+    });
+    buildChips($('#s-vibrate'), [{ v: true, l: '📳 Vibración' }, { v: false, l: 'Sin vibración' }], () => settings.vibrate, v => {
+      settings.vibrate = v; persistSettings();
+      if (v) buzz(40);
+    });
+    renderBoards();
+
+    const sfx = $('#s-board-sfx');
+    sfx.innerHTML = '';
+    (window.SFX ? window.SFX.names : []).forEach(n => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip';
+      b.textContent = SFX_LABELS[n] || n;
+      b.addEventListener('click', () => play(n));
+      sfx.append(b);
+    });
+
     const n = Object.values(sent).filter(ms => ms > Date.now()).length;
     if (settings.remindersOn) setStatus(n ? `Avisos programados ahora: ${n}` : 'Todavía no hay avisos programados.');
     else setStatus('Los avisos están desactivados.');
@@ -455,8 +796,10 @@
     try {
       await ntfyPost('', { title: '📝 ¡Funciona!', body: 'Así te llegarán tus recordatorios de Mis Notas.' });
       setStatus('Enviada ✓ Revisa tu celular (en la app ntfy).');
+      play('bell');
     } catch (e) {
       setStatus('No se pudo enviar. ¿Tienes internet?');
+      play('error');
     }
   }
 
@@ -464,6 +807,7 @@
     const v = $('#s-topic').value.trim();
     if (!/^[A-Za-z0-9_-]{8,64}$/.test(v)) {
       setStatus('El tema debe tener de 8 a 64 letras, números, - o _ (sin espacios).');
+      play('error');
       return;
     }
     if (v === settings.topic) { setStatus('Ese ya es tu tema.'); return; }
@@ -471,17 +815,18 @@
     settings.topic = v;
     persistSettings();
     setStatus('Tema guardado ✓');
+    play('bell');
     syncReminders();
   }
 
   async function copyTopic() {
     const v = $('#s-topic').value;
-    try { await navigator.clipboard.writeText(v); toast('Tema copiado 📋'); }
+    try { await navigator.clipboard.writeText(v); toast('Tema copiado 📋'); play('pop'); }
     catch (e) { $('#s-topic').select(); toast('Selecciónalo y cópialo'); }
   }
 
   function exportData() {
-    const payload = { app: 'mis-notas', v: 1, topic: settings.topic, tasks };
+    const payload = { app: 'mis-notas', v: 2, topic: settings.topic, tasks };
     const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -490,11 +835,20 @@
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    play('bell');
     toast('Copia guardada 💾');
   }
 
   function cleanTask(x) {
     if (!x || typeof x.title !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(x.date || '')) return null;
+    const subs = Array.isArray(x.subs)
+      ? x.subs.filter(s => s && typeof s.t === 'string' && /^[A-Za-z0-9]{2,12}$/.test(s.id || '')).slice(0, 20).map(s => ({ id: s.id, t: s.t.slice(0, 60) }))
+      : [];
+    const stks = Array.isArray(x.stk)
+      ? x.stk.filter(s => s && window.STK && window.STK.byId[s.k]).slice(0, MAX_STK).map(s => ({
+        k: s.k, x: num(s.x, 0, 100, 50), y: num(s.y, 0, 100, 50), s: num(s.s, 0.4, 3.2, 1), r: num(s.r, -720, 720, 0)
+      }))
+      : [];
     return {
       id: /^[A-Za-z0-9-]{3,40}$/.test(x.id || '') ? x.id : newId(),
       title: x.title.slice(0, 140),
@@ -504,6 +858,8 @@
       remind: [-1, 0, 10, 60, 1440].includes(x.remind) ? x.remind : -1,
       color: Number.isInteger(x.color) && x.color >= 0 && x.color < COLORS.length ? x.color : 0,
       done: x.done && typeof x.done === 'object' ? x.done : {},
+      sdone: x.sdone && typeof x.sdone === 'object' ? x.sdone : {},
+      subs, stk: stks,
       created: x.created || Date.now()
     };
   }
@@ -521,8 +877,10 @@
         persist();
         render();
         syncReminders();
+        play('tada');
         toast('Notas importadas ✓');
       } catch (e) {
+        play('error');
         toast('Ese archivo no sirve 😕');
       }
     };
@@ -544,12 +902,27 @@
     const d = new Date(viewY, viewM + delta, 1);
     viewY = d.getFullYear();
     viewM = d.getMonth();
+    play('flip');
     renderCalendar();
+  }
+  function changeWeek(delta) {
+    const d = parseYmd(sel);
+    d.setDate(d.getDate() + 7 * delta);
+    sel = ymd(d);
+    viewY = d.getFullYear();
+    viewM = d.getMonth();
+    play('flip');
+    renderWeek(true, true);
   }
 
   $('#prev').addEventListener('click', () => changeMonth(-1));
   $('#next').addEventListener('click', () => changeMonth(1));
+  $('#wprev').addEventListener('click', () => changeWeek(-1));
+  $('#wnext').addEventListener('click', () => changeWeek(1));
+  $('#v-month').addEventListener('click', () => { if (settings.view !== 'month') { play('flip'); setView('month'); } });
+  $('#v-week').addEventListener('click', () => { if (settings.view !== 'week') { play('flip'); setView('week'); } });
   $('#btn-today').addEventListener('click', () => {
+    play('tap');
     sel = todayStr();
     viewY = new Date().getFullYear();
     viewM = new Date().getMonth();
@@ -558,10 +931,26 @@
   $('#grid').addEventListener('click', e => {
     const c = e.target.closest('.cell');
     if (!c) return;
+    play('tap');
     sel = c.dataset.date;
     const d = parseYmd(sel);
     if (d.getMonth() !== viewM) { viewY = d.getFullYear(); viewM = d.getMonth(); }
     render();
+  });
+
+  // semana: tocar el encabezado de un día o su botón "+ nota"
+  $('#week-board').addEventListener('click', e => {
+    const col = e.target.closest('.col');
+    if (!col) return;
+    if (e.target.closest('.col-head')) {
+      play('tap');
+      sel = col.dataset.date;
+      renderWeek(false, false);
+    } else if (e.target.closest('.col-add')) {
+      play('pop');
+      sel = col.dataset.date;
+      openEditor(null, col.dataset.date);
+    }
   });
 
   // deslizar el calendario para cambiar de mes
@@ -572,13 +961,58 @@
     if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) changeMonth(dx < 0 ? 1 : -1);
   }, { passive: true });
 
-  $('#fab').addEventListener('click', () => openEditor(null));
+  $('#fab').addEventListener('click', () => { play('pop'); openEditor(null); });
   $('#f-save').addEventListener('click', saveEditor);
   $('#f-cancel').addEventListener('click', closeSheets);
   $('#f-delete').addEventListener('click', deleteFromEditor);
-  $('#f-clear-time').addEventListener('click', () => { $('#f-time').value = ''; });
+  $('#f-clear-time').addEventListener('click', () => { play('tap'); $('#f-time').value = ''; });
+  $('#f-add-sub').addEventListener('click', () => addSub());
+  $('#f-title').addEventListener('input', e => { $('#stage-title').textContent = e.target.value; });
   backdrop.addEventListener('click', closeSheets);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheets(); });
+
+  // escenario de pegatinas: tocar para elegir, arrastrar para mover
+  const stage = $('#stage');
+  let drag = null;
+  stage.addEventListener('pointerdown', e => {
+    const el = e.target.closest('.stk');
+    if (!el) { selStk = -1; renderStage(); return; }
+    const i = +el.dataset.i;
+    selStk = i;
+    drag = { i, moved: false };
+    try { el.setPointerCapture(e.pointerId); } catch (err) { /* nada */ }
+    stage.querySelectorAll('.stk').forEach(n => n.classList.toggle('sel', +n.dataset.i === i));
+    $('#stk-tools').hidden = false;
+    e.preventDefault();
+  });
+  stage.addEventListener('pointermove', e => {
+    if (!drag || !stk[drag.i]) return;
+    const r = stage.getBoundingClientRect();
+    const s = stk[drag.i];
+    s.x = Math.max(0, Math.min(100, (e.clientX - r.left) / r.width * 100));
+    s.y = Math.max(0, Math.min(100, (e.clientY - r.top) / r.height * 100));
+    drag.moved = true;
+    const el = stage.querySelector(`.stk[data-i="${drag.i}"]`);
+    if (el) { el.style.left = s.x + '%'; el.style.top = s.y + '%'; }
+  });
+  const endDrag = () => { if (drag && drag.moved) play('drop'); drag = null; };
+  stage.addEventListener('pointerup', endDrag);
+  stage.addEventListener('pointercancel', endDrag);
+
+  $('#stk-tools').addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b || selStk < 0 || !stk[selStk]) return;
+    const s = stk[selStk];
+    const act = b.dataset.act;
+    if (act === 'smaller') s.s = Math.max(0.4, +(s.s / 1.18).toFixed(2));
+    else if (act === 'bigger') s.s = Math.min(3.2, +(s.s * 1.18).toFixed(2));
+    else if (act === 'rotl') s.r -= 15;
+    else if (act === 'rotr') s.r += 15;
+    else if (act === 'front') { stk.push(stk.splice(selStk, 1)[0]); selStk = stk.length - 1; }
+    else if (act === 'del') { stk.splice(selStk, 1); selStk = -1; play('peel'); renderStage(); return; }
+    play('chip');
+    renderStage();
+  });
 
   $('#btn-settings').addEventListener('click', () => { renderSettings(); openSheet(settingsSheet); });
   $('#s-close').addEventListener('click', closeSheets);
@@ -591,7 +1025,7 @@
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      if (sel === todayStr() || true) render();
+      render(false, false);
       syncReminders();
     }
   });
@@ -599,6 +1033,11 @@
 
   /* ================= Inicio ================= */
   applyTheme();
+  applyBoard();
+  applySound();
+  document.body.dataset.view = settings.view;
+  $('#v-month').classList.toggle('on', settings.view === 'month');
+  $('#v-week').classList.toggle('on', settings.view === 'week');
   render();
   syncReminders();
 
