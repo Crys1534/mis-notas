@@ -8,15 +8,12 @@
     { v: 'none', l: 'Una vez' },
     { v: 'daily', l: 'Cada día' },
     { v: 'weekly', l: 'Cada semana' },
-    { v: 'monthly', l: 'Cada mes' }
   ];
-  const REPEAT_TXT = { none: '', daily: 'cada día', weekly: 'cada semana', monthly: 'cada mes' };
+  const REPEAT_TXT = { none: '', daily: 'cada día', weekly: 'cada semana'};
   const REMINDS = [
     { v: -1, l: 'Sin aviso' },
     { v: 0, l: 'A la hora' },
-    { v: 10, l: '10 min antes' },
     { v: 60, l: '1 hora antes' },
-    { v: 1440, l: '1 día antes' }
   ];
   const BOARDS = [
     { v: 'cork', l: 'Corcho', c: '#c9a36d' },
