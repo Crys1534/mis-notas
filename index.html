@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="es" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#c9a36d">
+  <title>Mis Notas</title>
+
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Mis Notas">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<main class="app">
+  <div class="topbar">
+    <span class="label-tape">Mis notas</span>
+    <div class="top-actions">
+      <button id="btn-today" class="pill" type="button">Hoy</button>
+      <button id="btn-settings" class="pill round" type="button" aria-label="Ajustes">⚙&#xFE0E;</button>
+    </div>
+  </div>
+
+  <section class="cal" id="cal">
+    <div class="cal-top"></div>
+    <header class="cal-head">
+      <h1 id="month-title"></h1>
+      <div class="nav">
+        <button id="prev" type="button" aria-label="Mes anterior">‹</button>
+        <button id="next" type="button" aria-label="Mes siguiente">›</button>
+      </div>
+    </header>
+    <div class="weekdays"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
+    <div id="grid" class="grid"></div>
+  </section>
+
+  <section class="day">
+    <div class="day-head">
+      <h2 id="day-title"></h2>
+      <div id="progress" class="progress"></div>
+    </div>
+    <div id="notes" class="notes"></div>
+  </section>
+</main>
+
+<button id="fab" class="fab" type="button" aria-label="Nueva nota">+</button>
+<div id="backdrop" class="backdrop"></div>
+
+<!-- Hoja para crear / editar una nota -->
+<div id="editor" class="sheet" role="dialog" aria-modal="true" aria-label="Nota">
+  <div class="sheet-grip"></div>
+  <textarea id="f-title" rows="2" maxlength="140" placeholder="¿Qué hay que hacer?"></textarea>
+
+  <div class="row2">
+    <label class="field">Fecha
+      <input type="date" id="f-date">
+    </label>
+    <label class="field">Hora
+      <span class="time-wrap">
+        <input type="time" id="f-time">
+        <button type="button" id="f-clear-time" class="x" aria-label="Quitar hora">✕</button>
+      </span>
+    </label>
+  </div>
+
+  <div class="fld"><span class="lbl">Repetir</span><div id="f-repeat" class="chips"></div></div>
+  <div class="fld">
+    <span class="lbl">Recordar</span>
+    <div id="f-remind" class="chips"></div>
+    <small class="hint">Si no pones hora, el aviso llega a las 9:00.</small>
+  </div>
+  <div class="fld"><span class="lbl">Color</span><div id="f-color" class="swatches"></div></div>
+
+  <div class="actions">
+    <button id="f-delete" class="link danger" type="button">Borrar</button>
+    <button id="f-cancel" class="btn ghost" type="button">Cancelar</button>
+    <button id="f-save" class="btn" type="button">Pegar nota</button>
+  </div>
+</div>
+
+<!-- Hoja de ajustes -->
+<div id="settings" class="sheet paper" role="dialog" aria-modal="true" aria-label="Ajustes">
+  <div class="sheet-grip"></div>
+  <h3>Ajustes</h3>
+
+  <section>
+    <h4>🔔 Recordatorios en tu celular</h4>
+    <div id="s-remind-on" class="chips"></div>
+    <ol class="steps">
+      <li>Instala gratis la app <b>ntfy</b> (Play Store o App Store).</li>
+      <li>Ábrela, toca <b>+</b> y escribe este nombre de tema:</li>
+    </ol>
+    <div class="topic">
+      <input id="s-topic" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off">
+      <button id="s-copy" class="btn small" type="button">Copiar</button>
+    </div>
+    <ol class="steps" start="3">
+      <li>Aquí abajo toca <b>Enviar prueba</b>. Si te llega, ¡listo!</li>
+    </ol>
+    <div class="row-actions">
+      <button id="s-test" class="btn small" type="button">Enviar prueba</button>
+      <button id="s-save-topic" class="btn small ghost" type="button">Guardar tema</button>
+    </div>
+    <p id="s-status" class="hint"></p>
+    <p class="hint">El nombre del tema funciona como una contraseña: no lo compartas. Cada vez que abres la app se programan los avisos de los próximos 3 días, así que ábrela al menos cada 3 días.</p>
+  </section>
+
+  <section>
+    <h4>🎨 Apariencia</h4>
+    <div id="s-theme" class="chips"></div>
+  </section>
+
+  <section>
+    <h4>💾 Copia de seguridad</h4>
+    <div class="row-actions">
+      <button id="s-export" class="btn small ghost" type="button">Exportar</button>
+      <button id="s-import" class="btn small ghost" type="button">Importar</button>
+    </div>
+    <input id="s-file" type="file" accept="application/json,.json" hidden>
+  </section>
+
+  <div class="actions"><button id="s-close" class="btn" type="button">Listo</button></div>
+</div>
+
+<div id="toast" class="toast" role="status"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
