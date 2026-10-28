@@ -1,6 +1,6 @@
 // Service worker: deja la app funcionar sin internet.
 // Si cambias algún archivo, sube el número de versión para que el celular se actualice.
-const VERSION = 'mis-notas-v2';
+const VERSION = 'calendario-v3';
 const SHELL = [
   './',
   './index.html',

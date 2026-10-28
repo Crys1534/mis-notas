@@ -1,7 +1,7 @@
 {
-  "name": "Mis Notas",
-  "short_name": "Mis Notas",
-  "description": "Calendario con tus tareas como post-its",
+  "name": "Calendario",
+  "short_name": "Calendario",
+  "description": "Tu calendario con tareas como post-its",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

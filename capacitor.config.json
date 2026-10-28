@@ -1,0 +1,6 @@
+{
+  "appId": "com.calendario.app",
+  "appName": "Calendario",
+  "webDir": "www",
+  "android": { "adjustMarginsForEdgeToEdge": "auto" }
+}

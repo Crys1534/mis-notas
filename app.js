@@ -1,19 +1,26 @@
 'use strict';
-(() => {
+(async () => {
   /* ================= Constantes ================= */
-  const COLORS = ['#fff59d', '#ffb3d1', '#a5dcff', '#b8f0a6', '#ffc98a', '#d9c2ff'];
+  const COLORS = ['#fff59d', '#ffb3d1', '#a5dcff', '#b8f0a6', '#ffc98a', '#d9c2ff',
+    '#ff9a8b', '#7fe3d3', '#dcef6e', '#ff8ad8', '#8fb2ff', '#f3eee0'];
   const MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
   const DAYS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
   const REPEATS = [
     { v: 'none', l: 'Una vez' },
-    { v: 'daily', l: 'Cada día' },
-    { v: 'weekly', l: 'Cada semana' },
+    { v: 'daily', l: 'Diariamente' },
+    { v: 'weekly', l: 'Semanalmente' },
+    { v: 'biweekly', l: 'Cada 14 días' },
+    { v: 'monthly', l: 'Mensualmente' },
+    { v: 'yearly', l: 'Anualmente' }
   ];
-  const REPEAT_TXT = { none: '', daily: 'cada día', weekly: 'cada semana'};
+  const REPEAT_KEYS = REPEATS.map(r => r.v);
+  const REPEAT_TXT = { none: '', daily: 'cada día', weekly: 'cada semana', biweekly: 'cada 14 días', monthly: 'cada mes', yearly: 'cada año' };
   const REMINDS = [
     { v: -1, l: 'Sin aviso' },
     { v: 0, l: 'A la hora' },
+    { v: 10, l: '10 min antes' },
     { v: 60, l: '1 hora antes' },
+    { v: 1440, l: '1 día antes' }
   ];
   const BOARDS = [
     { v: 'cork', l: 'Corcho', c: '#c9a36d' },
@@ -41,7 +48,7 @@
   const todayStr = () => ymd(new Date());
   const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
   const load = (k, fb) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fb; } catch (e) { return fb; } };
-  const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* sin espacio */ } };
+  const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* sin espacio */ } mirrorSoon(); };
   const newId = () => 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
   const hash = s => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); };
   const num = (v, a, b, fb) => (typeof v === 'number' && isFinite(v) ? Math.min(b, Math.max(a, v)) : fb);
@@ -51,7 +58,70 @@
     (window.crypto || window.msCrypto).getRandomValues(a);
     return 'notas-' + Array.from(a, n => abc[n % abc.length]).join('');
   };
+  const paperEl = () => { const p = document.createElement('span'); p.className = 'paper'; return p; };
   const byTime = (a, b) => (a.time || '').localeCompare(b.time || '') || (a.created || 0) - (b.created || 0);
+
+  /* ================= Memoria persistente ================= */
+  // Los datos se guardan en varios lugares a la vez; si uno se borra, se recupera de otro.
+  const KEYS = ['pn.tasks', 'pn.todos', 'pn.cstk', 'pn.settings', 'pn.sent'];
+  const nativePlugin = n => { try { return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins[n]) || null; } catch (e) { return null; } };
+  const isNative = () => { try { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); } catch (e) { return false; } };
+  const storage = { persisted: false, native: isNative(), restored: false };
+  function idb() {
+    return new Promise((res, rej) => {
+      if (!window.indexedDB) { rej(new Error('sin idb')); return; }
+      const r = indexedDB.open('calendario', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  }
+  async function idbGet(k) {
+    const db = await idb();
+    return new Promise((res, rej) => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+  }
+  async function idbSet(k, v) {
+    const db = await idb();
+    return new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); });
+  }
+  function snapshot() {
+    const o = { at: Date.now() };
+    KEYS.forEach(k => { try { const v = localStorage.getItem(k); if (v != null) o[k] = v; } catch (e) { /* nada */ } });
+    return o;
+  }
+  let mirrorT = null;
+  function mirrorSoon() { clearTimeout(mirrorT); mirrorT = setTimeout(mirrorNow, 500); }
+  async function mirrorNow() {
+    clearTimeout(mirrorT);
+    const snap = snapshot();
+    if (snap['pn.tasks'] == null && snap['pn.todos'] == null && snap['pn.cstk'] == null) return;   // nunca pisar un respaldo con "nada"
+    try { await idbSet('backup', snap); } catch (e) { /* nada */ }
+    const pref = nativePlugin('Preferences');
+    if (pref) { try { await pref.set({ key: 'pn.backup', value: JSON.stringify(snap) }); } catch (e) { /* nada */ } }
+  }
+  async function restoreIfEmpty() {
+    let have = false;
+    try { have = !!(localStorage.getItem('pn.tasks') || localStorage.getItem('pn.todos') || localStorage.getItem('pn.cstk')); } catch (e) { /* nada */ }
+    if (have) return false;
+    let a = null, b = null;
+    const pref = nativePlugin('Preferences');
+    if (pref) { try { const r = await pref.get({ key: 'pn.backup' }); if (r && r.value) a = JSON.parse(r.value); } catch (e) { /* nada */ } }
+    try { b = await idbGet('backup'); } catch (e) { /* nada */ }
+    const snap = [a, b].filter(Boolean).sort((x, y) => (y.at || 0) - (x.at || 0))[0];
+    if (!snap) return false;
+    KEYS.forEach(k => { if (snap[k] != null) { try { localStorage.setItem(k, snap[k]); } catch (e) { /* nada */ } } });
+    return true;
+  }
+  async function askPersist() {
+    try {
+      if (navigator.storage && navigator.storage.persist) {
+        if (await navigator.storage.persisted()) return true;
+        return await navigator.storage.persist();
+      }
+    } catch (e) { /* nada */ }
+    return false;
+  }
+  storage.restored = await restoreIfEmpty();
 
   /* ================= Estado ================= */
   let tasks = load('pn.tasks', []);
@@ -60,8 +130,12 @@
     load('pn.settings', {})
   );
   if (!BOARDS.some(b => b.v === settings.board)) settings.board = 'cork';
-  if (settings.view !== 'week') settings.view = 'month';
+  if (!['week', 'todo'].includes(settings.view)) settings.view = 'month';
   let sent = load('pn.sent', {});          // { idDeAviso: momentoEnMs }
+  let todos = load('pn.todos', []);        // ideas sin día
+  let cstk = load('pn.cstk', {});          // pegatinas del calendario por mes: { '2026-10': [...] }
+  if (!Array.isArray(todos)) todos = [];
+  if (!cstk || typeof cstk !== 'object' || Array.isArray(cstk)) cstk = {};
   if (!settings.topic) { settings.topic = genTopic(); }
   save('pn.settings', settings);
 
@@ -77,6 +151,8 @@
 
   const persist = () => save('pn.tasks', tasks);
   const persistSettings = () => save('pn.settings', settings);
+  const persistTodos = () => save('pn.todos', todos);
+  const persistCstk = () => save('pn.cstk', cstk);
 
   /* ================= Sonido y vibración ================= */
   const VOLS = { low: 0.3, mid: 0.6, high: 1 };
@@ -92,7 +168,9 @@
     if (t.repeat === 'daily') return true;
     const a = parseYmd(t.date), b = parseYmd(ds);
     if (t.repeat === 'weekly') return a.getDay() === b.getDay();
+    if (t.repeat === 'biweekly') return Math.round((b - a) / 864e5) % 14 === 0;
     if (t.repeat === 'monthly') return a.getDate() === b.getDate();
+    if (t.repeat === 'yearly') return a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
     return false;
   }
   const isDone = (t, ds) => !!(t.done && t.done[ds]);
@@ -144,7 +222,7 @@
       const ds = ymd(d);
       const cell = document.createElement('button');
       cell.type = 'button';
-      cell.className = 'cell' + (d.getMonth() !== viewM ? ' other' : '') + (ds === today ? ' today' : '') + (ds === sel ? ' sel' : '');
+      cell.className = 'cell' + (d.getMonth() !== viewM ? ' other' : '') + (ds < today ? ' past' : '') + (i % 7 >= 5 ? ' wknd' : '') + (ds === today ? ' today' : '') + (ds === sel ? ' sel' : '');
       cell.dataset.date = ds;
       cell.setAttribute('aria-label', `${d.getDate()} de ${MONTHS[d.getMonth()]}`);
       const n = document.createElement('span');
@@ -172,6 +250,7 @@
       }
       grid.append(cell);
     }
+    renderCalStk();
   }
 
   /* ================= Render: post-its ================= */
@@ -183,6 +262,7 @@
     card.style.setProperty('--r', (((hash(t.id) % 50) - 25) / 10) + 'deg');
     card.setAttribute('role', 'button');
     card.tabIndex = 0;
+    card.append(paperEl());
 
     const top = document.createElement('div');
     top.className = 'top';
@@ -275,6 +355,7 @@
     if (!list.length) {
       const e = document.createElement('div');
       e.className = 'note empty' + (anim ? ' anim' : '');
+      e.append(paperEl());
       const t = document.createElement('div');
       t.className = 'title';
       t.textContent = isToday ? 'Nada para hoy… ¡toca + para pegar una nota!' : 'Sin notas este día. ¡Toca + para pegar una!';
@@ -306,7 +387,7 @@
       day.setDate(start.getDate() + i);
       const ds = ymd(day);
       const col = document.createElement('div');
-      col.className = 'col' + (ds === today ? ' today' : '') + (ds === sel ? ' sel' : '');
+      col.className = 'col' + (ds < today ? ' past' : '') + (i >= 5 ? ' wknd' : '') + (ds === today ? ' today' : '') + (ds === sel ? ' sel' : '');
       col.dataset.date = ds;
 
       const head = document.createElement('button');
@@ -352,6 +433,8 @@
     clearTimeout(renderTimer);
     if (settings.view === 'week') {
       renderWeek(anim, center);
+    } else if (settings.view === 'todo') {
+      renderTodos();
     } else {
       renderCalendar();
       renderList(anim);
@@ -364,6 +447,7 @@
     document.body.dataset.view = v;
     $('#v-month').classList.toggle('on', v === 'month');
     $('#v-week').classList.toggle('on', v === 'week');
+    $('#v-todo').classList.toggle('on', v === 'todo');
     const d = parseYmd(sel);
     viewY = d.getFullYear();
     viewM = d.getMonth();
@@ -528,6 +612,7 @@
   function renderPacks() {
     if (!window.STK) return;
     const tabs = $('#pack-tabs');
+    const keepTabs = tabs.scrollLeft;
     tabs.innerHTML = '';
     window.STK.packs.forEach(p => {
       const b = document.createElement('button');
@@ -539,6 +624,7 @@
       b.addEventListener('click', () => { play('chip'); curPack = p.id; renderPacks(); });
       tabs.append(b);
     });
+    tabs.scrollLeft = keepTabs;
     const pack = window.STK.packs.find(p => p.id === curPack) || window.STK.packs[0];
     $('#pack-name').textContent = `${pack.icon} ${pack.name} · ${pack.items.length}`;
     const grid = $('#pack-grid');
@@ -565,16 +651,17 @@
     buzz(10);
   }
 
-  function openEditor(t, ds) {
+  function openEditor(t, ds, pre) {
     ed = t
       ? { id: t.id, color: t.color, repeat: t.repeat, remind: t.remind }
-      : { id: null, color: Math.floor(Math.random() * COLORS.length), repeat: 'none', remind: 0 };
-    $('#f-title').value = t ? t.title : '';
-    $('#stage-title').textContent = t ? t.title : '';
+      : { id: null, color: Math.floor(Math.random() * COLORS.length), repeat: 'none', remind: 0, fromTodo: pre ? pre.fromTodo : null };
+    const ttl = t ? t.title : (pre ? pre.title : '');
+    $('#f-title').value = ttl;
+    $('#stage-title').textContent = ttl;
     $('#f-date').value = t ? t.date : (ds || sel);
     $('#f-time').value = t ? t.time : '';
     $('#f-delete').style.display = t ? '' : 'none';
-    $('#f-save').textContent = t ? 'Guardar' : 'Pegar nota';
+    $('#f-save').textContent = t ? 'Guardar' : (pre ? 'Poner en el calendario' : 'Pegar nota');
     edSubs = t && t.subs ? t.subs.map(s => ({ id: s.id, t: s.t })) : [];
     stk = t && t.stk ? t.stk.map(s => Object.assign({}, s)) : [];
     selStk = -1;
@@ -589,7 +676,7 @@
     $('#d-stk').open = stk.length > 0;
     editor.scrollTop = 0;
     openSheet(editor);
-    if (!t) setTimeout(() => $('#f-title').focus(), 320);
+    if (!t && !pre) setTimeout(() => $('#f-title').focus(), 320);
   }
 
   function saveEditor() {
@@ -627,12 +714,14 @@
     viewY = d.getFullYear();
     viewM = d.getMonth();
     const wasEdit = !!ed.id;
+    const fromTodo = ed.fromTodo;
+    if (fromTodo) { todos = todos.filter(x => x.id !== fromTodo); persistTodos(); }
     closeSheets();
     render();
     syncReminders();
     play(wasEdit ? 'update' : 'paste');
     buzz(15);
-    toast(wasEdit ? 'Nota actualizada ✏️' : 'Nota pegada 📌');
+    toast(wasEdit ? 'Nota actualizada ✏️' : (fromTodo ? `Pasó al calendario: ${d.getDate()} de ${MONTHS[d.getMonth()]} 📌` : 'Nota pegada 📌'));
   }
 
   function deleteFromEditor() {
@@ -645,6 +734,99 @@
     render();
     play('peel');
     toast('Nota despegada 🗑️');
+  }
+
+  /* ================= Por hacer ================= */
+  function renderTodos() {
+    const box = $('#todo-list');
+    box.innerHTML = '';
+    const open = todos.filter(x => !x.done);
+    const done = todos.filter(x => x.done);
+    open.concat(done).forEach(item => box.append(todoRow(item)));
+    if (!todos.length) {
+      const e = document.createElement('div');
+      e.className = 'todo-empty';
+      e.textContent = 'Aquí van las cosas que quieres hacer, aunque todavía no sepas cuándo ✨';
+      box.append(e);
+    }
+    $('#todo-badge').textContent = open.length ? String(open.length) : '';
+    $('#todo-clear').style.display = done.length ? '' : 'none';
+  }
+
+  function todoRow(item) {
+    const row = document.createElement('div');
+    row.className = 'todo-row' + (item.done ? ' done' : '');
+    const chk = document.createElement('button');
+    chk.type = 'button';
+    chk.className = 'tcheck';
+    chk.setAttribute('aria-label', item.done ? 'Marcar como pendiente' : 'Marcar como hecha');
+    chk.innerHTML = CHECK_SVG;
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.maxLength = 100;
+    inp.value = item.t;
+    inp.setAttribute('aria-label', 'Idea');
+    inp.addEventListener('change', () => {
+      const v = inp.value.trim();
+      if (v) { item.t = v; persistTodos(); } else { inp.value = item.t; }
+    });
+    const day = document.createElement('button');
+    day.type = 'button';
+    day.className = 'tbtn';
+    day.textContent = '📅';
+    day.setAttribute('aria-label', 'Establecer día');
+    day.title = 'Establecer día';
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'tbtn tdel';
+    del.textContent = '✕';
+    del.setAttribute('aria-label', 'Borrar');
+    row.append(chk, inp, day, del);
+
+    chk.addEventListener('click', () => {
+      if (item.done) {
+        item.done = false;
+        persistTodos();
+        play('uncheck');
+        renderTodos();
+      } else {
+        item.done = true;
+        persistTodos();
+        row.classList.add('done');
+        burst(chk);
+        play('check');
+        buzz(20);
+        setTimeout(renderTodos, 650);
+      }
+    });
+    day.addEventListener('click', () => { play('pop'); openEditor(null, todayStr(), { title: item.t, fromTodo: item.id }); });
+    del.addEventListener('click', () => {
+      play('peel');
+      todos = todos.filter(x => x.id !== item.id);
+      persistTodos();
+      renderTodos();
+    });
+    return row;
+  }
+
+  function addTodo(e) {
+    e.preventDefault();
+    const inp = $('#todo-input');
+    const v = inp.value.trim();
+    if (!v) {
+      play('error');
+      inp.classList.remove('shake');
+      void inp.offsetWidth;
+      inp.classList.add('shake');
+      return;
+    }
+    todos.push({ id: newId(), t: v.slice(0, 100), done: false, created: Date.now() });
+    persistTodos();
+    inp.value = '';
+    play('paste');
+    buzz(12);
+    renderTodos();
+    inp.focus();
   }
 
   /* ================= Recordatorios (ntfy) ================= */
@@ -783,6 +965,14 @@
       sfx.append(b);
     });
 
+    $('#s-storage').textContent = storage.native
+      ? '✅ Tus notas se guardan en 3 lugares dentro del teléfono (la app, una base de datos y el almacenamiento de Android). Limpiar la caché no las toca. Si algún día desinstalas la app, Android puede restaurarlas desde tu copia de Google.'
+      : (storage.persisted
+        ? '✅ El navegador protegió tus datos: no se borran solos cuando falta espacio. Además hay una segunda copia interna. Si borras "datos del sitio" a propósito, sí se perderían: haz copias con Exportar.'
+        : '⚠️ El navegador no confirmó la protección. Hay una segunda copia interna, pero si borras los datos del sitio se perderían. Haz copias con Exportar de vez en cuando.');
+    $('#s-lastbackup').textContent = settings.lastExport
+      ? 'Última copia exportada: ' + new Date(settings.lastExport).toLocaleDateString('es-MX', { day: 'numeric', month: 'long' })
+      : 'Todavía no has exportado ninguna copia.';
     const n = Object.values(sent).filter(ms => ms > Date.now()).length;
     if (settings.remindersOn) setStatus(n ? `Avisos programados ahora: ${n}` : 'Todavía no hay avisos programados.');
     else setStatus('Los avisos están desactivados.');
@@ -791,7 +981,7 @@
   async function sendTest() {
     setStatus('Enviando…');
     try {
-      await ntfyPost('', { title: '📝 ¡Funciona!', body: 'Así te llegarán tus recordatorios de Mis Notas.' });
+      await ntfyPost('', { title: '📝 ¡Funciona!', body: 'Así te llegarán tus recordatorios del Calendario.' });
       setStatus('Enviada ✓ Revisa tu celular (en la app ntfy).');
       play('bell');
     } catch (e) {
@@ -822,36 +1012,58 @@
     catch (e) { $('#s-topic').select(); toast('Selecciónalo y cópialo'); }
   }
 
-  function exportData() {
-    const payload = { app: 'mis-notas', v: 2, topic: settings.topic, tasks };
-    const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' });
+  async function exportData() {
+    const payload = { app: 'calendario', v: 3, topic: settings.topic, tasks, todos, cstk };
+    const text = JSON.stringify(payload, null, 1);
+    const name = `calendario-${todayStr()}.json`;
+    const fsys = nativePlugin('Filesystem'), share = nativePlugin('Share');
+    if (storage.native && fsys && share) {                       // en la app: abre el menú de compartir
+      try {
+        await fsys.writeFile({ path: name, data: text, directory: 'CACHE', encoding: 'utf8' });
+        const u = await fsys.getUri({ path: name, directory: 'CACHE' });
+        await share.share({ title: 'Copia del Calendario', text: 'Guarda este archivo en un lugar seguro', url: u.uri, dialogTitle: 'Guardar copia' });
+        markBackup();
+        return;
+      } catch (e) {
+        if (/cancel/i.test(String(e && e.message))) return;
+      }
+    }
+    const blob = new Blob([text], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `mis-notas-${todayStr()}.json`;
+    a.download = name;
     document.body.append(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    markBackup();
+  }
+  function markBackup() {
+    settings.lastExport = Date.now();
+    persistSettings();
     play('bell');
     toast('Copia guardada 💾');
+    if (settingsSheet.classList.contains('open')) renderSettings();
   }
+
+  const cleanStk = a => (Array.isArray(a)
+    ? a.filter(s => s && window.STK && window.STK.byId[s.k]).slice(0, MAX_STK).map(s => ({
+      k: s.k, x: num(s.x, 0, 100, 50), y: num(s.y, 0, 100, 50), s: num(s.s, 0.4, 3.2, 1), r: num(s.r, -720, 720, 0)
+    }))
+    : []);
 
   function cleanTask(x) {
     if (!x || typeof x.title !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(x.date || '')) return null;
     const subs = Array.isArray(x.subs)
       ? x.subs.filter(s => s && typeof s.t === 'string' && /^[A-Za-z0-9]{2,12}$/.test(s.id || '')).slice(0, 20).map(s => ({ id: s.id, t: s.t.slice(0, 60) }))
       : [];
-    const stks = Array.isArray(x.stk)
-      ? x.stk.filter(s => s && window.STK && window.STK.byId[s.k]).slice(0, MAX_STK).map(s => ({
-        k: s.k, x: num(s.x, 0, 100, 50), y: num(s.y, 0, 100, 50), s: num(s.s, 0.4, 3.2, 1), r: num(s.r, -720, 720, 0)
-      }))
-      : [];
+    const stks = cleanStk(x.stk);
     return {
       id: /^[A-Za-z0-9-]{3,40}$/.test(x.id || '') ? x.id : newId(),
       title: x.title.slice(0, 140),
       date: x.date,
       time: /^\d{2}:\d{2}$/.test(x.time || '') ? x.time : '',
-      repeat: ['none', 'daily', 'weekly', 'monthly'].includes(x.repeat) ? x.repeat : 'none',
+      repeat: REPEAT_KEYS.includes(x.repeat) ? x.repeat : 'none',
       remind: [-1, 0, 10, 60, 1440].includes(x.remind) ? x.remind : -1,
       color: Number.isInteger(x.color) && x.color >= 0 && x.color < COLORS.length ? x.color : 0,
       done: x.done && typeof x.done === 'object' ? x.done : {},
@@ -872,6 +1084,17 @@
         cancelAll();
         tasks = list;
         persist();
+        if (Array.isArray(data.todos)) {
+          todos = data.todos.filter(x => x && typeof x.t === 'string').slice(0, 300).map(x => ({
+            id: /^[A-Za-z0-9-]{3,40}$/.test(x.id || '') ? x.id : newId(), t: x.t.slice(0, 100), done: !!x.done, created: x.created || Date.now()
+          }));
+          persistTodos();
+        }
+        if (data.cstk && typeof data.cstk === 'object' && !Array.isArray(data.cstk)) {
+          cstk = {};
+          Object.keys(data.cstk).filter(k => /^\d{4}-\d{2}$/.test(k)).forEach(k => { cstk[k] = cleanStk(data.cstk[k]); });
+          persistCstk();
+        }
         render();
         syncReminders();
         play('tada');
@@ -894,13 +1117,135 @@
     toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
   }
 
+  /* ================= Pegatinas del calendario ================= */
+  let decoMode = false, calSel = -1;
+  let decoPack = window.STK ? window.STK.packs[0].id : '';
+  const MAX_CSTK = 30;
+  const mKey = () => `${viewY}-${pad(viewM + 1)}`;
+
+  function renderCalStk() {
+    const box = $('#cal-stk');
+    if (!box) return;
+    box.innerHTML = '';
+    const list = cstk[mKey()] || [];
+    list.forEach((s, i) => {
+      const el = stickerEl(s);
+      if (!el) return;
+      el.dataset.i = i;
+      if (decoMode && i === calSel) el.classList.add('sel');
+      box.append(el);
+    });
+    $('#deco-tools').hidden = !(decoMode && calSel >= 0 && list[calSel]);
+  }
+
+  function renderDecoPacks() {
+    if (!window.STK) return;
+    const tabs = $('#deco-tabs');
+    const keep = tabs.scrollLeft;
+    tabs.innerHTML = '';
+    window.STK.packs.forEach(p => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'pack-tab' + (p.id === decoPack ? ' on' : '');
+      b.textContent = p.icon;
+      b.title = p.name;
+      b.setAttribute('aria-label', p.name);
+      b.addEventListener('click', () => { play('chip'); decoPack = p.id; renderDecoPacks(); });
+      tabs.append(b);
+    });
+    tabs.scrollLeft = keep;
+    const pack = window.STK.packs.find(p => p.id === decoPack) || window.STK.packs[0];
+    const grid = $('#deco-grid');
+    grid.innerHTML = '';
+    pack.items.forEach(it => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'pack-item' + (it.w > 1 ? ' wide' : '');
+      b.setAttribute('aria-label', it.id);
+      b.innerHTML = it.svg;
+      b.addEventListener('click', () => addCalSticker(it));
+      grid.append(b);
+    });
+  }
+
+  function addCalSticker(it) {
+    const key = mKey();
+    const list = cstk[key] || (cstk[key] = []);
+    if (list.length >= MAX_CSTK) { toast('¡Ya hay muchas pegatinas en este mes! 😸'); play('error'); return; }
+    const s = { k: it.id, x: 15 + Math.random() * 70, y: 28 + Math.random() * 58, s: 1, r: Math.round(Math.random() * 24 - 12) };
+    if (it.tape) { s.x = 50; s.y = 8 + Math.random() * 8; s.r = Math.round(Math.random() * 10 - 5); }
+    list.push(s);
+    calSel = list.length - 1;
+    persistCstk();
+    renderCalStk();
+    play(it.snd === 'cat' ? (Math.random() < 0.5 ? 'meow' : 'mew') : (it.snd || 'sticker'));
+    buzz(10);
+  }
+
+  function enterDeco() {
+    if (settings.view !== 'month') setView('month');
+    decoMode = true;
+    calSel = -1;
+    $('#deco').hidden = false;
+    document.body.classList.add('deco-on');
+    $('#cal').classList.add('decorating');
+    renderDecoPacks();
+    renderCalStk();
+    play('open');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  function exitDeco() {
+    if (!decoMode) return;
+    decoMode = false;
+    calSel = -1;
+    $('#deco').hidden = true;
+    document.body.classList.remove('deco-on');
+    $('#cal').classList.remove('decorating');
+    renderCalStk();
+    play('close');
+  }
+
   /* ================= Eventos ================= */
+  const REDUCE = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  let flipping = false;
+  function leafOf(el) {                       // copia "de papel" de la hoja del calendario
+    const c = el.cloneNode(true);
+    c.removeAttribute('id');
+    c.querySelectorAll('[id]').forEach(n => n.removeAttribute('id'));
+    c.classList.remove('decorating');
+    c.classList.add('leaf');
+    return c;
+  }
   function changeMonth(delta) {
+    if (flipping) return;
     const d = new Date(viewY, viewM + delta, 1);
+    const wrap = $('#cal-wrap'), cal = $('#cal');
+    play('flip');
+    calSel = -1;
+    if (REDUCE || settings.view !== 'month') {
+      viewY = d.getFullYear();
+      viewM = d.getMonth();
+      renderCalendar();
+      return;
+    }
+    const old = leafOf(cal);
     viewY = d.getFullYear();
     viewM = d.getMonth();
-    play('flip');
-    renderCalendar();
+    renderCalendar();                         // la hoja de verdad ya muestra el mes nuevo
+    flipping = true;
+    const done = () => { wrap.querySelectorAll('.leaf').forEach(n => n.remove()); flipping = false; };
+    if (delta > 0) {                          // la hoja vieja se levanta y se va hacia arriba
+      old.classList.add('flip-up');
+      wrap.append(old);
+      old.addEventListener('animationend', done, { once: true });
+    } else {                                  // la hoja nueva cae desde arriba sobre la vieja
+      const incoming = leafOf(cal);
+      old.classList.add('under');
+      incoming.classList.add('flip-down');
+      wrap.append(old, incoming);
+      incoming.addEventListener('animationend', done, { once: true });
+    }
+    setTimeout(done, 1000);
   }
   function changeWeek(delta) {
     const d = parseYmd(sel);
@@ -918,6 +1263,9 @@
   $('#wnext').addEventListener('click', () => changeWeek(1));
   $('#v-month').addEventListener('click', () => { if (settings.view !== 'month') { play('flip'); setView('month'); } });
   $('#v-week').addEventListener('click', () => { if (settings.view !== 'week') { play('flip'); setView('week'); } });
+  $('#v-todo').addEventListener('click', () => { if (settings.view !== 'todo') { play('flip'); setView('todo'); } });
+  $('#todo-form').addEventListener('submit', addTodo);
+  $('#todo-clear').addEventListener('click', () => { play('peel'); todos = todos.filter(x => !x.done); persistTodos(); renderTodos(); });
   $('#btn-today').addEventListener('click', () => {
     play('tap');
     sel = todayStr();
@@ -927,7 +1275,7 @@
   });
   $('#grid').addEventListener('click', e => {
     const c = e.target.closest('.cell');
-    if (!c) return;
+    if (!c || decoMode) return;
     play('tap');
     sel = c.dataset.date;
     const d = parseYmd(sel);
@@ -958,7 +1306,62 @@
     if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) changeMonth(dx < 0 ? 1 : -1);
   }, { passive: true });
 
-  $('#fab').addEventListener('click', () => { play('pop'); openEditor(null); });
+  // pegatinas del calendario: arrastrar, girar, agrandar
+  const calStkBox = $('#cal-stk');
+  let cdrag = null;
+  calStkBox.addEventListener('pointerdown', e => {
+    if (!decoMode) return;
+    const el = e.target.closest('.stk');
+    if (!el) return;
+    calSel = +el.dataset.i;
+    cdrag = { i: calSel, moved: false };
+    try { el.setPointerCapture(e.pointerId); } catch (err) { /* nada */ }
+    calStkBox.querySelectorAll('.stk').forEach(n => n.classList.toggle('sel', +n.dataset.i === calSel));
+    $('#deco-tools').hidden = false;
+    e.preventDefault();
+  });
+  calStkBox.addEventListener('pointermove', e => {
+    if (!cdrag) return;
+    const list = cstk[mKey()];
+    const s = list && list[cdrag.i];
+    if (!s) return;
+    const r = calStkBox.getBoundingClientRect();
+    s.x = Math.max(0, Math.min(100, (e.clientX - r.left) / r.width * 100));
+    s.y = Math.max(0, Math.min(100, (e.clientY - r.top) / r.height * 100));
+    cdrag.moved = true;
+    const el = calStkBox.querySelector(`.stk[data-i="${cdrag.i}"]`);
+    if (el) { el.style.left = s.x + '%'; el.style.top = s.y + '%'; }
+  });
+  const endCDrag = () => { if (cdrag && cdrag.moved) { play('drop'); persistCstk(); } cdrag = null; };
+  calStkBox.addEventListener('pointerup', endCDrag);
+  calStkBox.addEventListener('pointercancel', endCDrag);
+  $('#cal').addEventListener('pointerdown', e => {
+    if (decoMode && calSel >= 0 && !e.target.closest('.stk')) { calSel = -1; renderCalStk(); }
+  });
+  $('#deco-tools').addEventListener('click', e => {
+    const b = e.target.closest('button');
+    const list = cstk[mKey()];
+    if (!b || calSel < 0 || !list || !list[calSel]) return;
+    const s = list[calSel];
+    const act = b.dataset.act;
+    if (act === 'smaller') s.s = Math.max(0.4, +(s.s / 1.18).toFixed(2));
+    else if (act === 'bigger') s.s = Math.min(3.2, +(s.s * 1.18).toFixed(2));
+    else if (act === 'rotl') s.r -= 15;
+    else if (act === 'rotr') s.r += 15;
+    else if (act === 'front') { list.push(list.splice(calSel, 1)[0]); calSel = list.length - 1; }
+    else if (act === 'del') { list.splice(calSel, 1); calSel = -1; play('peel'); persistCstk(); renderCalStk(); return; }
+    play('chip');
+    persistCstk();
+    renderCalStk();
+  });
+  $('#btn-deco').addEventListener('click', () => { if (decoMode) exitDeco(); else enterDeco(); });
+  $('#deco-done').addEventListener('click', exitDeco);
+
+  $('#fab').addEventListener('click', () => {
+    play('pop');
+    if (settings.view === 'todo') { $('#todo-input').focus(); return; }
+    openEditor(null);
+  });
   $('#f-save').addEventListener('click', saveEditor);
   $('#f-cancel').addEventListener('click', closeSheets);
   $('#f-delete').addEventListener('click', deleteFromEditor);
@@ -1020,6 +1423,7 @@
   $('#s-import').addEventListener('click', () => $('#s-file').click());
   $('#s-file').addEventListener('change', e => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ''; });
 
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') mirrorNow(); });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       render(false, false);
@@ -1035,8 +1439,23 @@
   document.body.dataset.view = settings.view;
   $('#v-month').classList.toggle('on', settings.view === 'month');
   $('#v-week').classList.toggle('on', settings.view === 'week');
+  $('#v-todo').classList.toggle('on', settings.view === 'todo');
   render();
   syncReminders();
+  mirrorNow();
+  askPersist().then(v => { storage.persisted = v; });
+  if (storage.restored) setTimeout(() => toast('Recuperé tus datos guardados 💾'), 500);
+
+  const appPlug = nativePlugin('App');
+  if (appPlug && appPlug.addListener) {
+    appPlug.addListener('backButton', () => {
+      if (editor.classList.contains('open') || settingsSheet.classList.contains('open')) closeSheets();
+      else if (decoMode) exitDeco();
+      else if (settings.view !== 'month') setView('month');
+      else if (appPlug.exitApp) appPlug.exitApp();
+    });
+  }
+  if (storage.native) document.body.classList.add('native');
 
   if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
     navigator.serviceWorker.register('sw.js').catch(() => { });

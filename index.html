@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#c9a36d">
-  <title>Mis Notas</title>
+  <title>Calendario</title>
 
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="Mis Notas">
+  <meta name="apple-mobile-web-app-title" content="Calendario">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -23,7 +23,6 @@
 
 <main class="app">
   <div class="topbar">
-    <span class="label-tape">Mis notas</span>
     <div class="top-actions">
       <button id="btn-today" class="pill" type="button">Hoy</button>
       <button id="btn-settings" class="pill round" type="button" aria-label="Ajustes">⚙&#xFE0E;</button>
@@ -33,21 +32,26 @@
   <div class="seg" role="group" aria-label="Vista">
     <button id="v-month" type="button" class="on">Mes</button>
     <button id="v-week" type="button">Semana</button>
+    <button id="v-todo" type="button">Por hacer <b id="todo-badge" class="badge"></b></button>
   </div>
 
   <!-- vista de mes -->
+  <div class="cal-wrap" id="cal-wrap">
   <section class="cal" id="cal">
     <div class="cal-top"></div>
     <header class="cal-head">
       <h1 id="month-title"></h1>
       <div class="nav">
+        <button id="btn-deco" type="button" class="deco-btn" aria-label="Decorar con pegatinas">🎀</button>
         <button id="prev" type="button" aria-label="Mes anterior">‹</button>
         <button id="next" type="button" aria-label="Mes siguiente">›</button>
       </div>
     </header>
     <div class="weekdays"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
     <div id="grid" class="grid"></div>
+    <div id="cal-stk" class="cal-stk"></div>
   </section>
+  </div>
 
   <section class="day">
     <div class="day-head">
@@ -66,7 +70,37 @@
     </div>
     <div id="week-board" class="week-board"></div>
   </section>
+
+  <!-- por hacer -->
+  <section class="todo" id="todo">
+    <div class="pad">
+      <div class="pad-top"></div>
+      <div class="pad-title">Por hacer ✏️</div>
+      <p class="pad-sub">Ideas sin día todavía. Cuando decidas cuándo, toca 📅.</p>
+      <form id="todo-form" class="todo-form" autocomplete="off">
+        <input id="todo-input" type="text" maxlength="100" placeholder="Nueva idea…" enterkeyhint="done">
+        <button type="submit" class="btn small">Agregar</button>
+      </form>
+      <div id="todo-list" class="todo-list"></div>
+      <div class="todo-foot"><button id="todo-clear" type="button" class="link">Quitar las hechas</button></div>
+    </div>
+  </section>
 </main>
+
+<!-- panel para decorar el calendario -->
+<div id="deco" class="deco" hidden>
+  <div class="deco-head"><b>🎀 Decora este mes</b><button id="deco-done" class="btn small" type="button">Listo</button></div>
+  <div id="deco-tools" class="stk-tools" hidden>
+    <button type="button" data-act="smaller" aria-label="Más chica">➖</button>
+    <button type="button" data-act="bigger" aria-label="Más grande">➕</button>
+    <button type="button" data-act="rotl" aria-label="Girar a la izquierda">↶</button>
+    <button type="button" data-act="rotr" aria-label="Girar a la derecha">↷</button>
+    <button type="button" data-act="front" aria-label="Traer al frente">⬆</button>
+    <button type="button" data-act="del" aria-label="Quitar pegatina">🗑</button>
+  </div>
+  <div id="deco-tabs" class="pack-tabs"></div>
+  <div id="deco-grid" class="deco-grid"></div>
+</div>
 
 <button id="fab" class="fab" type="button" aria-label="Nueva nota">+</button>
 <div id="backdrop" class="backdrop"></div>
@@ -170,6 +204,12 @@
     <div id="s-vibrate" class="chips" style="margin-top:8px"></div>
     <p class="hint">Toca para probar:</p>
     <div id="s-board-sfx" class="chips sfx"></div>
+  </section>
+
+  <section>
+    <h4>🛡 Memoria protegida</h4>
+    <p id="s-storage" class="hint"></p>
+    <p id="s-lastbackup" class="hint"></p>
   </section>
 
   <section>
