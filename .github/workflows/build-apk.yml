@@ -28,15 +28,18 @@ jobs:
       - run: pip install pillow
       - name: Icono de la app
         run: |
-          for d in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
-            n=${d%%:*}; s=${d##*:}
-            mkdir -p android/app/src/main/res/mipmap-$n
-            for f in ic_launcher ic_launcher_round ic_launcher_foreground; do
-              python3 -c "
-from PIL import Image
-Image.open('icon-512.png').convert('RGBA').resize(($s,$s)).save('android/app/src/main/res/mipmap-$n/$f.png')" || true
-            done
-          done
+          cat > icons.py <<'PYEOF'
+          from PIL import Image
+          import os
+          sizes = {'mdpi': 48, 'hdpi': 72, 'xhdpi': 96, 'xxhdpi': 144, 'xxxhdpi': 192}
+          img = Image.open('icon-512.png').convert('RGBA')
+          for name, px in sizes.items():
+              d = 'android/app/src/main/res/mipmap-' + name
+              os.makedirs(d, exist_ok=True)
+              for f in ('ic_launcher', 'ic_launcher_round', 'ic_launcher_foreground'):
+                  img.resize((px, px)).save(d + '/' + f + '.png')
+          PYEOF
+          python3 icons.py
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher*.xml
 
       - name: Construir APK
