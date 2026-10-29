@@ -59,7 +59,12 @@
     return 'notas-' + Array.from(a, n => abc[n % abc.length]).join('');
   };
   const paperEl = () => { const p = document.createElement('span'); p.className = 'paper'; return p; };
-  const byTime = (a, b) => (a.time || '').localeCompare(b.time || '') || (a.created || 0) - (b.created || 0);
+  const KINDS = [{ v: 'task', l: '✅ Tarea' }, { v: 'event', l: '📌 Evento' }, { v: 'bday', l: '🎂 Cumpleaños' }];
+  const KIND_ICON = { event: '📌', bday: '🎂' };
+  const KIND_PH = { task: '¿Qué hay que hacer?', event: '¿Qué evento es? (cita, pago de nómina…)', bday: '¿De quién es el cumpleaños?' };
+  const kindOf = t => (t && (t.kind === 'event' || t.kind === 'bday')) ? t.kind : 'task';
+  const isTask = t => kindOf(t) === 'task';
+  const byTime = (a, b) => (kindOf(a) === 'bday' ? 0 : 1) - (kindOf(b) === 'bday' ? 0 : 1) || (a.time || '').localeCompare(b.time || '') || (a.created || 0) - (b.created || 0);
 
   /* ================= Memoria persistente ================= */
   // Los datos se guardan en varios lugares a la vez; si uno se borra, se recupera de otro.
@@ -176,6 +181,7 @@
   const isDone = (t, ds) => !!(t.done && t.done[ds]);
   const tasksOn = ds => tasks.filter(t => occursOn(t, ds));
   function isLate(t, ds) {
+    if (!isTask(t)) return false;
     if (isDone(t, ds)) return false;
     const today = todayStr();
     if (ds < today) return true;
@@ -236,8 +242,10 @@
         m.className = 'minis';
         list.slice(0, 3).forEach(t => {
           const s = document.createElement('i');
-          s.className = 'mini' + (isDone(t, ds) ? ' done' : '');
-          s.style.background = COLORS[t.color];
+          const k = kindOf(t);
+          s.className = 'mini' + (k === 'task' && isDone(t, ds) ? ' done' : '') + (k !== 'task' ? ' ' + k : '');
+          if (k === 'bday') { s.textContent = '🎂'; }
+          else s.style.background = COLORS[t.color];
           m.append(s);
         });
         if (list.length > 3) {
@@ -255,9 +263,10 @@
 
   /* ================= Render: post-its ================= */
   function makeCard(t, ds, compact, anim) {
-    const done = isDone(t, ds);
+    const kind = kindOf(t);
+    const done = kind === 'task' && isDone(t, ds);
     const card = document.createElement('div');
-    card.className = 'note' + (done ? ' done' : '') + (compact ? ' compact' : '') + (anim ? ' anim' : '');
+    card.className = 'note' + (kind !== 'task' ? ' ' + kind : '') + (done ? ' done' : '') + (compact ? ' compact' : '') + (anim ? ' anim' : '');
     card.style.setProperty('--c', COLORS[t.color]);
     card.style.setProperty('--r', (((hash(t.id) % 50) - 25) / 10) + 'deg');
     card.setAttribute('role', 'button');
@@ -271,7 +280,8 @@
     check.className = 'check';
     check.setAttribute('aria-label', done ? 'Marcar como pendiente' : 'Marcar como hecha');
     check.innerHTML = CHECK_SVG;
-    top.append(check);
+    if (kind === 'task') top.append(check);
+    else { const ic = document.createElement('span'); ic.className = 'kind-ic'; ic.textContent = KIND_ICON[kind]; top.append(ic); }
     if (t.time) {
       const tm = document.createElement('span');
       tm.className = 'time';
@@ -321,7 +331,7 @@
 
     (t.stk || []).forEach(s => { const el = stickerEl(s); if (el) card.append(el); });
 
-    check.addEventListener('click', e => { e.stopPropagation(); toggleDone(t, ds, card, check); });
+    if (kind === 'task') check.addEventListener('click', e => { e.stopPropagation(); toggleDone(t, ds, card, check); });
     card.addEventListener('click', () => openEditor(t));
     card.addEventListener('keydown', e => { if (e.key === 'Enter') openEditor(t); });
     return card;
@@ -333,16 +343,17 @@
     $('#day-title').textContent = (isToday ? 'Hoy · ' : '') + cap(DAYS[d.getDay()]) + ` ${d.getDate()} de ${MONTHS[d.getMonth()]}`;
 
     const list = tasksOn(sel).sort(byTime);
-    const doneN = list.filter(t => isDone(t, sel)).length;
+    const tl = list.filter(isTask);
+    const doneN = tl.filter(t => isDone(t, sel)).length;
     const prog = $('#progress');
     prog.innerHTML = '';
-    if (list.length) {
+    if (tl.length) {
       const txt = document.createElement('span');
-      txt.textContent = `${doneN} de ${list.length}`;
+      txt.textContent = `${doneN} de ${tl.length}`;
       const bar = document.createElement('span');
       bar.className = 'bar';
       const fill = document.createElement('i');
-      fill.style.width = Math.round(doneN / list.length * 100) + '%';
+      fill.style.width = Math.round(doneN / tl.length * 100) + '%';
       bar.append(fill);
       prog.append(txt, bar);
       prog.style.display = '';
@@ -653,8 +664,8 @@
 
   function openEditor(t, ds, pre) {
     ed = t
-      ? { id: t.id, color: t.color, repeat: t.repeat, remind: t.remind }
-      : { id: null, color: Math.floor(Math.random() * COLORS.length), repeat: 'none', remind: 0, fromTodo: pre ? pre.fromTodo : null };
+      ? { id: t.id, color: t.color, repeat: t.repeat, remind: t.remind, kind: kindOf(t) }
+      : { id: null, color: Math.floor(Math.random() * COLORS.length), repeat: 'none', remind: 0, kind: (pre && pre.kind) || 'task', fromTodo: pre ? pre.fromTodo : null };
     const ttl = t ? t.title : (pre ? pre.title : '');
     $('#f-title').value = ttl;
     $('#stage-title').textContent = ttl;
@@ -666,6 +677,20 @@
     stk = t && t.stk ? t.stk.map(s => Object.assign({}, s)) : [];
     selStk = -1;
     editor.style.setProperty('--sheet', COLORS[ed.color]);
+    const setKind = v => {
+      ed.kind = v;
+      $('#f-title').placeholder = KIND_PH[v];
+      if (v === 'bday') { ed.repeat = 'yearly'; if (!ed.id) ed.color = 1; }
+      if (v !== 'task' && !ed.id && ed.remind === 0 && v === 'event') ed.remind = 60;
+      editor.style.setProperty('--sheet', COLORS[ed.color]);
+      buildChips($('#f-repeat'), REPEATS, () => ed.repeat, x => { ed.repeat = x; });
+      buildChips($('#f-remind'), REMINDS, () => ed.remind, x => { ed.remind = x; });
+      buildSwatches();
+      $('#d-subs').style.display = v === 'task' ? '' : 'none';
+    };
+    buildChips($('#f-kind'), KINDS, () => ed.kind, setKind);
+    $('#f-title').placeholder = KIND_PH[ed.kind];
+    $('#d-subs').style.display = ed.kind === 'task' ? '' : 'none';
     buildChips($('#f-repeat'), REPEATS, () => ed.repeat, v => { ed.repeat = v; });
     buildChips($('#f-remind'), REMINDS, () => ed.remind, v => { ed.remind = v; });
     buildSwatches();
@@ -692,9 +717,9 @@
     }
     const date = $('#f-date').value || sel;
     const time = $('#f-time').value || '';
-    const subs = edSubs.filter(s => s.t.trim()).map(s => ({ id: s.id, t: s.t.trim().slice(0, 60) }));
+    const subs = ed.kind !== 'task' ? [] : edSubs.filter(s => s.t.trim()).map(s => ({ id: s.id, t: s.t.trim().slice(0, 60) }));
     const data = {
-      title, date, time, repeat: ed.repeat, remind: ed.remind, color: ed.color,
+      kind: ed.kind, title, date, time, repeat: ed.repeat, remind: ed.remind, color: ed.color,
       subs, stk: stk.map(s => Object.assign({}, s))
     };
 
@@ -1060,6 +1085,7 @@
     const stks = cleanStk(x.stk);
     return {
       id: /^[A-Za-z0-9-]{3,40}$/.test(x.id || '') ? x.id : newId(),
+      kind: x.kind === 'event' || x.kind === 'bday' ? x.kind : 'task',
       title: x.title.slice(0, 140),
       date: x.date,
       time: /^\d{2}:\d{2}$/.test(x.time || '') ? x.time : '',

@@ -633,3 +633,16 @@ body.native .app { padding-top: calc(env(safe-area-inset-top) + 14px); }
 /* título del mes en una sola línea */
 .cal-head h1 { font-size: clamp(24px, 7.4vw, 32px); white-space: nowrap; }
 .cal-head .nav { gap: 2px; }
+
+/* ---------- eventos y cumpleaños ---------- */
+.chips.kinds { margin: 2px 0 10px; }
+.kind-ic { font-size: 20px; line-height: 1; filter: drop-shadow(0 1px 0 rgba(255,255,255,.6)); }
+.note.event .title, .note.bday .title { text-decoration: none; }
+/* evento: etiqueta con cinta a la izquierda */
+.note.event::before { content: ''; position: absolute; left: 0; top: 14%; bottom: 14%; width: 6px; border-radius: 0 4px 4px 0; background: rgba(43,42,51,.35); z-index: 2; }
+/* cumpleaños: borde de confeti */
+.note.bday .paper { background-image: radial-gradient(circle, rgba(255,255,255,.9) 1.6px, transparent 2px), radial-gradient(circle, rgba(255,90,140,.35) 1.6px, transparent 2px); background-size: 22px 22px, 22px 22px; background-position: 0 0, 11px 11px; background-blend-mode: normal; }
+.mini.event { width: 9px; height: 9px; border-radius: 50%; transform: none; box-shadow: 0 0 0 2px rgba(43,42,51,.55) inset; }
+.mini.bday { width: auto; height: auto; background: none !important; box-shadow: none; transform: none; font-size: 12px; line-height: 1; }
+.chips.kinds { flex-wrap: nowrap; gap: 6px; }
+.chips.kinds .chip { padding: 8px 10px; font-size: 15px; white-space: nowrap; flex: 1 1 auto; text-align: center; }
