@@ -646,3 +646,32 @@ body.native .app { padding-top: calc(env(safe-area-inset-top) + 14px); }
 .mini.bday { width: auto; height: auto; background: none !important; box-shadow: none; transform: none; font-size: 12px; line-height: 1; }
 .chips.kinds { flex-wrap: nowrap; gap: 6px; }
 .chips.kinds .chip { padding: 8px 10px; font-size: 15px; white-space: nowrap; flex: 1 1 auto; text-align: center; }
+
+/* ---------- v5: engranaje flotante, sin barra superior ---------- */
+.topbar { display: none; }
+.app { padding-top: calc(10px + env(safe-area-inset-top)); }
+body.native .app { padding-top: calc(env(safe-area-inset-top) + 8px); }
+.fab-gear { position: fixed; top: calc(10px + env(safe-area-inset-top)); right: 12px; z-index: 18; width: 42px; height: 42px; padding: 0; display: grid; place-items: center; font-size: 22px; }
+body.native .fab-gear { top: calc(env(safe-area-inset-top) + 8px); }
+.seg { margin: 0 56px 12px 0; max-width: calc(100% - 56px); }
+.seg button { padding: 3px 12px; font-size: 18px; }
+#month-title, #week-title { cursor: pointer; }
+
+/* ---------- destacados por año ---------- */
+.stars { display: none; }
+body[data-view="stars"] .stars { display: block; }
+body[data-view="stars"] .cal-wrap, body[data-view="stars"] .day, body[data-view="stars"] .week, body[data-view="stars"] .todo { display: none; }
+body[data-view="month"] .stars, body[data-view="week"] .stars, body[data-view="todo"] .stars { display: none; }
+.stars-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.stars-month { align-self: flex-start; margin-top: 8px; padding: 2px 12px; background: #1f1f24; color: #f4f4f4; border-radius: 4px; text-transform: capitalize; letter-spacing: .08em; font-size: 17px; transform: rotate(-1.5deg); }
+.star-row { display: flex; align-items: center; gap: 12px; text-align: left; padding: 8px 12px; border-radius: 6px; background: var(--c, #fff59d); color: #2b2a33; box-shadow: 0 3px 6px -2px rgba(0, 0, 0, .35); }
+.sr-day { flex: 0 0 40px; text-align: center; font-size: 24px; line-height: 1; }
+.sr-txt { display: flex; flex-direction: column; min-width: 0; }
+.sr-txt b { font-weight: 400; font-size: 20px; overflow-wrap: anywhere; }
+.sr-txt small { font-size: 15px; opacity: .7; }
+.stars-empty { padding: 18px; text-align: center; background: var(--paper); color: var(--ink); border-radius: 10px; font-size: 18px; }
+
+/* avisos: textos distintos en la APK y en la web */
+.native-only { display: none; }
+body.native .native-only { display: block; }
+body.native .ntfy-only { display: none !important; }

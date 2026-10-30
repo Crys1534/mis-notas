@@ -25,6 +25,12 @@ jobs:
       - run: npx cap add android
       - run: npx cap sync android
 
+      - name: Permisos de avisos
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's#</manifest>#    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n</manifest>#' $M
+          grep -n "uses-permission" $M
+
       - run: pip install pillow
       - name: Icono de la app
         run: |

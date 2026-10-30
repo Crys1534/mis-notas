@@ -135,7 +135,7 @@
     load('pn.settings', {})
   );
   if (!BOARDS.some(b => b.v === settings.board)) settings.board = 'cork';
-  if (!['week', 'todo'].includes(settings.view)) settings.view = 'month';
+  if (!['week', 'todo', 'stars'].includes(settings.view)) settings.view = 'month';
   let sent = load('pn.sent', {});          // { idDeAviso: momentoEnMs }
   let todos = load('pn.todos', []);        // ideas sin día
   let cstk = load('pn.cstk', {});          // pegatinas del calendario por mes: { '2026-10': [...] }
@@ -261,6 +261,66 @@
     renderCalStk();
   }
 
+  /* ================= Eventos destacados por año ================= */
+  let starYear = new Date().getFullYear();
+  function starRows(year) {
+    const rows = [];
+    tasks.filter(t => t.star && kindOf(t) === 'event').forEach(t => {
+      if (['daily', 'weekly', 'biweekly'].includes(t.repeat)) {
+        if (parseYmd(t.date).getFullYear() <= year) rows.push({ t, ds: t.date > `${year}-01-01` ? t.date : `${year}-01-01`, every: true });
+        return;
+      }
+      for (let d = new Date(year, 0, 1); d.getFullYear() === year; d.setDate(d.getDate() + 1)) {
+        const ds = ymd(d);
+        if (occursOn(t, ds)) rows.push({ t, ds });
+      }
+    });
+    return rows.sort((a, b) => a.ds.localeCompare(b.ds) || (a.t.time || '').localeCompare(b.t.time || ''));
+  }
+  function renderStars() {
+    $('#stars-year').textContent = starYear;
+    const box = $('#stars-list');
+    box.innerHTML = '';
+    const rows = starRows(starYear);
+    if (!rows.length) {
+      const e = document.createElement('p');
+      e.className = 'stars-empty';
+      e.textContent = 'Aún no hay eventos destacados este año. Crea un 📌 Evento y elige ⭐ Destacado.';
+      box.append(e);
+      return;
+    }
+    let lastM = -1;
+    rows.forEach(({ t, ds, every }) => {
+      const d = parseYmd(ds);
+      if (d.getMonth() !== lastM) {
+        lastM = d.getMonth();
+        const h = document.createElement('div');
+        h.className = 'stars-month';
+        h.textContent = MONTHS[lastM];
+        box.append(h);
+      }
+      const r = document.createElement('button');
+      r.type = 'button';
+      r.className = 'star-row';
+      r.style.setProperty('--c', COLORS[t.color]);
+      const dn = document.createElement('span');
+      dn.className = 'sr-day';
+      dn.textContent = every ? '🔁' : d.getDate();
+      const tx = document.createElement('span');
+      tx.className = 'sr-txt';
+      const ti = document.createElement('b');
+      ti.textContent = t.title;
+      const meta = document.createElement('small');
+      meta.textContent = (every ? REPEAT_TXT[t.repeat] : ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'][d.getDay()]) + (t.time ? ' · ⏰ ' + t.time : '');
+      tx.append(ti, meta);
+      r.append(dn, tx);
+      r.addEventListener('click', () => { play('tap'); openEditor(t); });
+      box.append(r);
+    });
+  }
+  $('#stars-prev').addEventListener('click', () => { play('flip'); starYear--; renderStars(); });
+  $('#stars-next').addEventListener('click', () => { play('flip'); starYear++; renderStars(); });
+
   /* ================= Render: post-its ================= */
   function makeCard(t, ds, compact, anim) {
     const kind = kindOf(t);
@@ -281,7 +341,7 @@
     check.setAttribute('aria-label', done ? 'Marcar como pendiente' : 'Marcar como hecha');
     check.innerHTML = CHECK_SVG;
     if (kind === 'task') top.append(check);
-    else { const ic = document.createElement('span'); ic.className = 'kind-ic'; ic.textContent = KIND_ICON[kind]; top.append(ic); }
+    else { const ic = document.createElement('span'); ic.className = 'kind-ic'; ic.textContent = KIND_ICON[kind] + (t.star ? '⭐' : ''); top.append(ic); }
     if (t.time) {
       const tm = document.createElement('span');
       tm.className = 'time';
@@ -446,6 +506,8 @@
       renderWeek(anim, center);
     } else if (settings.view === 'todo') {
       renderTodos();
+    } else if (settings.view === 'stars') {
+      renderStars();
     } else {
       renderCalendar();
       renderList(anim);
@@ -459,6 +521,7 @@
     $('#v-month').classList.toggle('on', v === 'month');
     $('#v-week').classList.toggle('on', v === 'week');
     $('#v-todo').classList.toggle('on', v === 'todo');
+    $('#v-stars').classList.toggle('on', v === 'stars');
     const d = parseYmd(sel);
     viewY = d.getFullYear();
     viewM = d.getMonth();
@@ -664,8 +727,8 @@
 
   function openEditor(t, ds, pre) {
     ed = t
-      ? { id: t.id, color: t.color, repeat: t.repeat, remind: t.remind, kind: kindOf(t) }
-      : { id: null, color: Math.floor(Math.random() * COLORS.length), repeat: 'none', remind: 0, kind: (pre && pre.kind) || 'task', fromTodo: pre ? pre.fromTodo : null };
+      ? { id: t.id, color: t.color, repeat: t.repeat, remind: t.remind, kind: kindOf(t), star: !!t.star }
+      : { id: null, color: Math.floor(Math.random() * COLORS.length), repeat: 'none', remind: 0, kind: (pre && pre.kind) || 'task', star: false, fromTodo: pre ? pre.fromTodo : null };
     const ttl = t ? t.title : (pre ? pre.title : '');
     $('#f-title').value = ttl;
     $('#stage-title').textContent = ttl;
@@ -687,10 +750,13 @@
       buildChips($('#f-remind'), REMINDS, () => ed.remind, x => { ed.remind = x; });
       buildSwatches();
       $('#d-subs').style.display = v === 'task' ? '' : 'none';
+      $('#f-star-wrap').style.display = v === 'event' ? '' : 'none';
     };
     buildChips($('#f-kind'), KINDS, () => ed.kind, setKind);
     $('#f-title').placeholder = KIND_PH[ed.kind];
     $('#d-subs').style.display = ed.kind === 'task' ? '' : 'none';
+    $('#f-star-wrap').style.display = ed.kind === 'event' ? '' : 'none';
+    buildChips($('#f-star'), [{ v: false, l: '☆ Normal' }, { v: true, l: '⭐ Destacado' }], () => ed.star, v => { ed.star = v; });
     buildChips($('#f-repeat'), REPEATS, () => ed.repeat, v => { ed.repeat = v; });
     buildChips($('#f-remind'), REMINDS, () => ed.remind, v => { ed.remind = v; });
     buildSwatches();
@@ -719,7 +785,7 @@
     const time = $('#f-time').value || '';
     const subs = ed.kind !== 'task' ? [] : edSubs.filter(s => s.t.trim()).map(s => ({ id: s.id, t: s.t.trim().slice(0, 60) }));
     const data = {
-      kind: ed.kind, title, date, time, repeat: ed.repeat, remind: ed.remind, color: ed.color,
+      kind: ed.kind, star: ed.kind === 'event' && !!ed.star, title, date, time, repeat: ed.repeat, remind: ed.remind, color: ed.color,
       subs, stk: stk.map(s => Object.assign({}, s))
     };
 
@@ -868,11 +934,56 @@
     return fetch(`${NTFY}/${settings.topic}/${seq}`, { method: 'DELETE' }).catch(() => { });
   }
 
+  /* ----- avisos propios de Android (APK) ----- */
+  const LN = () => (isNative() ? nativePlugin('LocalNotifications') : null);
+  const NATIVE_DAYS = 45, NATIVE_MAX = 150;
+  async function nativeCancelAll(ln) {
+    try {
+      const pend = await ln.getPending();
+      if (pend && pend.notifications && pend.notifications.length) await ln.cancel({ notifications: pend.notifications.map(n => ({ id: n.id })) });
+    } catch (e) { /* nada que cancelar */ }
+  }
+  async function nativePerm(ln, ask) {
+    let p = await ln.checkPermissions();
+    if (p.display !== 'granted' && ask) p = await ln.requestPermissions();
+    return p.display === 'granted';
+  }
+  let nativeInfo = '';
+  async function syncNative(ln) {
+    await nativeCancelAll(ln);
+    if (!settings.remindersOn) { nativeInfo = ''; return; }
+    if (!(await nativePerm(ln, true))) { nativeInfo = 'Android no me dejó mandar avisos. Actívalos en Ajustes del teléfono → Apps → Calendario → Notificaciones.'; return; }
+    const now = Date.now(), list = [];
+    const base = new Date();
+    base.setHours(0, 0, 0, 0);
+    for (const t of tasks) {
+      if (t.remind < 0) continue;
+      for (let i = 0; i <= NATIVE_DAYS; i++) {
+        const d = new Date(base);
+        d.setDate(d.getDate() + i);
+        const ds = ymd(d);
+        if (!occursOn(t, ds) || (isTask(t) && isDone(t, ds))) continue;
+        const fireAt = fireTime(t, ds);
+        if (fireAt < now + 5e3) continue;
+        list.push({ fireAt, title: (KIND_ICON[kindOf(t)] || '📝') + ' ' + t.title.slice(0, 100), body: bodyFor(t, ds) });
+      }
+    }
+    list.sort((a, b) => a.fireAt - b.fireAt);
+    const items = list.slice(0, NATIVE_MAX).map((x, i) => ({
+      id: i + 1, title: x.title, body: x.body,
+      schedule: { at: new Date(x.fireAt), allowWhileIdle: true }
+    }));
+    if (items.length) await ln.schedule({ notifications: items });
+    nativeInfo = items.length ? `Avisos programados en tu teléfono: ${items.length}` : 'Todavía no hay avisos programados.';
+  }
+
   function cancelTask(id) {
+    if (LN()) { setTimeout(syncReminders, 300); return; }
     Object.keys(sent).filter(k => k.startsWith(id + '_')).forEach(k => { delete sent[k]; ntfyDelete(k); });
     save('pn.sent', sent);
   }
   function cancelAll() {
+    if (LN()) { nativeCancelAll(LN()); return; }
     Object.keys(sent).forEach(k => ntfyDelete(k));
     sent = {};
     save('pn.sent', sent);
@@ -889,6 +1000,8 @@
     if (syncing) { again = true; return; }
     syncing = true;
     try {
+      const ln = LN();
+      if (ln) { try { await syncNative(ln); } catch (e) { nativeInfo = 'No se pudieron programar los avisos.'; } return; }
       if (!settings.remindersOn || !settings.topic) return;
       const now = Date.now(), horizon = now + HORIZON;
       Object.keys(sent).forEach(k => { if (sent[k] < now - 3600e3) delete sent[k]; });
@@ -999,11 +1112,22 @@
       ? 'Última copia exportada: ' + new Date(settings.lastExport).toLocaleDateString('es-MX', { day: 'numeric', month: 'long' })
       : 'Todavía no has exportado ninguna copia.';
     const n = Object.values(sent).filter(ms => ms > Date.now()).length;
-    if (settings.remindersOn) setStatus(n ? `Avisos programados ahora: ${n}` : 'Todavía no hay avisos programados.');
+    if (LN()) setStatus(settings.remindersOn ? (nativeInfo || 'Avisos listos.') : 'Los avisos están desactivados.');
+    else if (settings.remindersOn) setStatus(n ? `Avisos programados ahora: ${n}` : 'Todavía no hay avisos programados.');
     else setStatus('Los avisos están desactivados.');
   }
 
   async function sendTest() {
+    const ln = LN();
+    if (ln) {
+      try {
+        if (!(await nativePerm(ln, true))) { setStatus('Android no me dejó mandar avisos. Actívalos en Ajustes del teléfono.'); play('error'); return; }
+        await ln.schedule({ notifications: [{ id: 999999, title: '📝 ¡Funciona!', body: 'Así te llegarán tus recordatorios del Calendario.', schedule: { at: new Date(Date.now() + 4000), allowWhileIdle: true } }] });
+        setStatus('Te llegará en 4 segundos ✓ (puedes salir de la app para verlo)');
+        play('bell');
+      } catch (e) { setStatus('No se pudo enviar la prueba.'); play('error'); }
+      return;
+    }
     setStatus('Enviando…');
     try {
       await ntfyPost('', { title: '📝 ¡Funciona!', body: 'Así te llegarán tus recordatorios del Calendario.' });
@@ -1086,6 +1210,7 @@
     return {
       id: /^[A-Za-z0-9-]{3,40}$/.test(x.id || '') ? x.id : newId(),
       kind: x.kind === 'event' || x.kind === 'bday' ? x.kind : 'task',
+      star: x.kind === 'event' && !!x.star,
       title: x.title.slice(0, 140),
       date: x.date,
       time: /^\d{2}:\d{2}$/.test(x.time || '') ? x.time : '',
@@ -1289,16 +1414,19 @@
   $('#wnext').addEventListener('click', () => changeWeek(1));
   $('#v-month').addEventListener('click', () => { if (settings.view !== 'month') { play('flip'); setView('month'); } });
   $('#v-week').addEventListener('click', () => { if (settings.view !== 'week') { play('flip'); setView('week'); } });
+  $('#v-stars').addEventListener('click', () => { if (settings.view !== 'stars') { play('flip'); setView('stars'); } });
   $('#v-todo').addEventListener('click', () => { if (settings.view !== 'todo') { play('flip'); setView('todo'); } });
   $('#todo-form').addEventListener('submit', addTodo);
   $('#todo-clear').addEventListener('click', () => { play('peel'); todos = todos.filter(x => !x.done); persistTodos(); renderTodos(); });
-  $('#btn-today').addEventListener('click', () => {
+  const goToday = () => {
     play('tap');
     sel = todayStr();
     viewY = new Date().getFullYear();
     viewM = new Date().getMonth();
     render();
-  });
+  };
+  $('#month-title').addEventListener('click', goToday);
+  $('#week-title').addEventListener('click', goToday);
   $('#grid').addEventListener('click', e => {
     const c = e.target.closest('.cell');
     if (!c || decoMode) return;
@@ -1466,6 +1594,7 @@
   $('#v-month').classList.toggle('on', settings.view === 'month');
   $('#v-week').classList.toggle('on', settings.view === 'week');
   $('#v-todo').classList.toggle('on', settings.view === 'todo');
+  $('#v-stars').classList.toggle('on', settings.view === 'stars');
   render();
   syncReminders();
   mirrorNow();

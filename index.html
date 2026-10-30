@@ -22,16 +22,12 @@
 <body data-view="month">
 
 <main class="app">
-  <div class="topbar">
-    <div class="top-actions">
-      <button id="btn-today" class="pill" type="button">Hoy</button>
-      <button id="btn-settings" class="pill round" type="button" aria-label="Ajustes">⚙&#xFE0E;</button>
-    </div>
-  </div>
+  <button id="btn-settings" class="pill round fab-gear" type="button" aria-label="Ajustes">⚙&#xFE0E;</button>
 
   <div class="seg" role="group" aria-label="Vista">
     <button id="v-month" type="button" class="on">Mes</button>
     <button id="v-week" type="button">Semana</button>
+    <button id="v-stars" type="button" aria-label="Eventos destacados">⭐</button>
     <button id="v-todo" type="button">Por hacer <b id="todo-badge" class="badge"></b></button>
   </div>
 
@@ -69,6 +65,16 @@
       <button id="wnext" class="pill round" type="button" aria-label="Semana siguiente">›</button>
     </div>
     <div id="week-board" class="week-board"></div>
+  </section>
+
+  <!-- eventos destacados -->
+  <section class="stars" id="stars">
+    <div class="week-head">
+      <button id="stars-prev" class="pill round" type="button" aria-label="Año anterior">‹</button>
+      <h2>⭐ Destacados <span id="stars-year"></span></h2>
+      <button id="stars-next" class="pill round" type="button" aria-label="Año siguiente">›</button>
+    </div>
+    <div id="stars-list" class="stars-list"></div>
   </section>
 
   <!-- por hacer -->
@@ -130,6 +136,7 @@
     <button type="button" id="f-add-sub" class="btn small ghost">+ Agregar paso</button>
   </details>
 
+  <div class="fld" id="f-star-wrap" style="display:none"><span class="lbl">Importancia</span><div id="f-star" class="chips"></div><small class="hint">Los destacados salen en la lista anual ⭐.</small></div>
   <div class="fld"><span class="lbl">Repetir</span><div id="f-repeat" class="chips"></div></div>
   <div class="fld">
     <span class="lbl">Recordar</span>
@@ -170,23 +177,24 @@
   <section>
     <h4>🔔 Recordatorios en tu celular</h4>
     <div id="s-remind-on" class="chips"></div>
-    <ol class="steps">
+    <ol class="steps ntfy-only">
       <li>Instala gratis la app <b>ntfy</b> (Play Store o App Store).</li>
       <li>Ábrela, toca <b>+</b> y escribe este nombre de tema:</li>
     </ol>
-    <div class="topic">
+    <div class="topic ntfy-only">
       <input id="s-topic" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off">
       <button id="s-copy" class="btn small" type="button">Copiar</button>
     </div>
-    <ol class="steps" start="3">
+    <ol class="steps ntfy-only" start="3">
       <li>Aquí abajo toca <b>Enviar prueba</b>. Si te llega, ¡listo!</li>
     </ol>
     <div class="row-actions">
       <button id="s-test" class="btn small" type="button">Enviar prueba</button>
-      <button id="s-save-topic" class="btn small ghost" type="button">Guardar tema</button>
+      <button id="s-save-topic" class="btn small ghost ntfy-only" type="button">Guardar tema</button>
     </div>
     <p id="s-status" class="hint"></p>
-    <p class="hint">El nombre del tema funciona como una contraseña: no lo compartas. Cada vez que abres la app se programan los avisos de los próximos 3 días, así que ábrela al menos cada 3 días.</p>
+    <p class="hint native-only">En la app, los avisos los manda tu propio teléfono: no necesitas internet ni otras apps. Se programan los próximos 45 días cada vez que abres Calendario, así que ábrela de vez en cuando.</p>
+    <p class="hint ntfy-only">El nombre del tema funciona como una contraseña: no lo compartas. Cada vez que abres la app se programan los avisos de los próximos 3 días, así que ábrela al menos cada 3 días.</p>
   </section>
 
   <section>
