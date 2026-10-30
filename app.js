@@ -299,23 +299,12 @@
         h.textContent = MONTHS[lastM];
         box.append(h);
       }
-      const r = document.createElement('button');
-      r.type = 'button';
-      r.className = 'star-row';
-      r.style.setProperty('--c', COLORS[t.color]);
+      const card = makeCard(t, ds, false, false);
       const dn = document.createElement('span');
-      dn.className = 'sr-day';
-      dn.textContent = every ? '🔁' : d.getDate();
-      const tx = document.createElement('span');
-      tx.className = 'sr-txt';
-      const ti = document.createElement('b');
-      ti.textContent = t.title;
-      const meta = document.createElement('small');
-      meta.textContent = (every ? REPEAT_TXT[t.repeat] : ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'][d.getDay()]) + (t.time ? ' · ⏰ ' + t.time : '');
-      tx.append(ti, meta);
-      r.append(dn, tx);
-      r.addEventListener('click', () => { play('tap'); openEditor(t); });
-      box.append(r);
+      dn.className = 'sr-date';
+      dn.textContent = every ? '🔁 ' + REPEAT_TXT[t.repeat] : ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'][d.getDay()] + ' ' + d.getDate();
+      card.querySelector('.top').append(dn);
+      box.append(card);
     });
   }
   $('#stars-prev').addEventListener('click', () => { play('flip'); starYear--; renderStars(); });

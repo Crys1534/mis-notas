@@ -1,6 +1,6 @@
 // Service worker: deja la app funcionar sin internet.
 // Si cambias algún archivo, sube el número de versión para que el celular se actualice.
-const VERSION = 'calendario-v6';
+const VERSION = 'calendario-v7';
 const SHELL = [
   './',
   './index.html',

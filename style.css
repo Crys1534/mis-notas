@@ -675,3 +675,11 @@ body[data-view="month"] .stars, body[data-view="week"] .stars, body[data-view="t
 .native-only { display: none; }
 body.native .native-only { display: block; }
 body.native .ntfy-only { display: none !important; }
+
+/* destacados: una columna de post-its rectangulares */
+.stars-list { gap: 22px; padding: 6px 6px 10px; }
+.stars-list .note { width: 100%; min-height: 0; padding: 22px 16px 14px; }
+.stars-list .note .title { font-size: 24px; }
+.stars-list .note .top { min-height: 28px; }
+.sr-date { margin-left: auto; padding: 1px 10px; border-radius: 999px; background: rgba(43, 42, 51, .14); font-size: 17px; white-space: nowrap; }
+.stars-list .stars-month { margin-bottom: -8px; }
